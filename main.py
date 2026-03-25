@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Pydantic models
 class AnswerRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
-    reference_answer: str = Field(..., min_length=1, max_length=5000)
+    reference_answer: Optional[str] = Field(None, max_length=5000)  # Optional for auto-reference mode
     student_answer: str = Field(..., min_length=1, max_length=5000)
     model_name: Optional[str] = None
     student_name: Optional[str] = None
@@ -70,14 +70,21 @@ app.add_middleware(
 
 
 # Helper functions
-def get_scoring_metrics(reference: str, student: str, question: str, model_name: Optional[str] = None):
+def get_scoring_metrics(reference: str, student: str, question: str, model_name: Optional[str] = None, use_cnn: bool = False):
     model_manager = get_model_manager()
-    return {
+    metrics = {
         "similarity": model_manager.compute_similarity(reference, student, model_name),
         "coverage": coverage_score(reference, student),
         "grammar": grammar_score(student),
         "relevance": model_manager.compute_relevance(question, student, model_name)
     }
+    
+    # Add CNN score if enabled
+    if use_cnn:
+        metrics["cnn_score"] = model_manager.compute_cnn_score(reference, student)
+        logger.debug(f"CNN Score: {metrics['cnn_score']}")
+    
+    return metrics
 
 
 # Endpoints
@@ -102,15 +109,34 @@ async def evaluate(request: Request, data: AnswerRequest):
     start_time = time.time()
     
     question = sanitize_text(data.question)
-    reference = sanitize_text(data.reference_answer)
     student = sanitize_text(data.student_answer)
     
-    metrics = get_scoring_metrics(reference, student, question, data.model_name)
+    # Check if we need to generate reference answer
+    use_auto_reference = request.query_params.get("auto_ref", "false").lower() == "true"
     
-    calculator = ScoreCalculator()
+    if use_auto_reference and question:
+        # Generate AI reference from question
+        try:
+            generator = get_reference_generator()
+            generated_ref = generator.generate_reference_answer(question)
+            reference = generated_ref.generated_answer if generated_ref else student
+        except Exception as e:
+            logger.warning(f"Auto-reference generation failed: {e}. Using student answer as fallback.")
+            reference = sanitize_text(data.reference_answer) or student
+    else:
+        # Use provided reference (manual mode)
+        reference = sanitize_text(data.reference_answer)
+    
+    # Check if CNN should be used (can be passed as query param or header)
+    use_cnn = request.query_params.get("use_cnn", "false").lower() == "true"
+    
+    metrics = get_scoring_metrics(reference, student, question, data.model_name, use_cnn)
+    
+    # Initialize calculator with CNN option
+    calculator = ScoreCalculator(use_cnn=use_cnn)
     final_score = calculator.calculate_final_score(**metrics)
     grade = determine_grade(final_score)
-    feedback = generate_feedback(final_score, **metrics)
+    feedback = generate_feedback(final_score, **{k: v for k, v in metrics.items() if k != 'cnn_score'})
     
     processing_time_ms = int((time.time() - start_time) * 1000)
     
@@ -131,9 +157,10 @@ async def evaluate(request: Request, data: AnswerRequest):
         processing_time_ms=processing_time_ms
     )
     
-    return {
+    response = {
         "question": question,
         "student_answer": student,
+        "reference_answer": reference,  # Include reference answer for UI display
         "similarity": metrics["similarity"],
         "coverage": metrics["coverage"],
         "grammar": metrics["grammar"],
@@ -144,6 +171,12 @@ async def evaluate(request: Request, data: AnswerRequest):
         "evaluation_id": eval_id,
         "processing_time_ms": processing_time_ms
     }
+    
+    # Include CNN score in response if used
+    if use_cnn and "cnn_score" in metrics:
+        response["cnn_score"] = metrics["cnn_score"]
+    
+    return response
 
 
 @app.post("/evaluate/pdf-auto")
@@ -270,6 +303,135 @@ async def evaluate_pdf(
 async def list_models():
     model_manager = get_model_manager()
     return model_manager.get_available_models()
+
+
+@app.post("/evaluate/batch")
+async def evaluate_batch(
+    request: Request,
+    batch_file: UploadFile = File(...),
+    reference_answer: str = Form(None),
+    auto_ref: bool = Form(False)
+):
+    """
+    Batch evaluation endpoint - evaluates multiple student answers at once.
+    
+    Accepts a ZIP file containing:
+    - question.txt (required)
+    - Multiple student answer files (student1_answer.txt, student2_answer.txt, etc.)
+    
+    Returns evaluation results for all students in the batch.
+    """
+    start_time = time.time()
+    
+    try:
+        # Validate and extract ZIP file
+        if not batch_file.filename.lower().endswith('.zip'):
+            raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+        
+        import zipfile
+        import io
+        
+        zip_content = await batch_file.read()
+        
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+                file_list = zip_file.namelist()
+                
+                # Find question file
+                question_files = [f for f in file_list if 'question' in f.lower()]
+                if not question_files:
+                    raise HTTPException(status_code=400, detail="No question file found in ZIP")
+                
+                question_file = question_files[0]
+                question_text = zip_file.read(question_file).decode('utf-8')
+                
+                # Find student answer files
+                student_files = [f for f in file_list if 'answer' in f.lower() and f.endswith('.txt')]
+                if not student_files:
+                    raise HTTPException(status_code=400, detail="No student answer files found in ZIP")
+                
+                student_files.sort()  # Sort for consistent ordering
+                
+                # Generate reference if auto mode, otherwise use provided
+                if auto_ref or not reference_answer:
+                    try:
+                        generator = get_reference_generator()
+                        generated_ref = generator.generate_reference_answer(question_text)
+                        reference = generated_ref.generated_answer if generated_ref else ""
+                    except Exception as e:
+                        logger.warning(f"Auto-reference generation failed: {e}")
+                        reference = reference_answer or ""
+                else:
+                    reference = reference_answer
+                
+                if not reference:
+                    raise HTTPException(status_code=400, detail="Reference answer required (provide via form or enable auto_ref)")
+                
+                # Evaluate each student answer
+                results = []
+                calculator = ScoreCalculator()
+                db = get_db_manager()
+                
+                for student_file in student_files:
+                    student_name = student_file.replace('_answer.txt', '').replace('.txt', '')
+                    student_answer = zip_file.read(student_file).decode('utf-8')
+                    
+                    # Calculate metrics
+                    metrics = get_scoring_metrics(reference, student_answer, question_text, use_cnn=False)
+                    final_score = calculator.calculate_final_score(**metrics)
+                    grade = determine_grade(final_score)
+                    feedback = generate_feedback(final_score, **{k: v for k, v in metrics.items() if k != 'cnn_score'})
+                    
+                    results.append({
+                        "student_name": student_name,
+                        "student_answer": student_answer,
+                        "similarity": round(metrics["similarity"], 3),
+                        "coverage": round(metrics["coverage"], 3),
+                        "grammar": round(metrics["grammar"], 3),
+                        "relevance": round(metrics["relevance"], 3),
+                        "final_score": round(final_score, 2),
+                        "grade": grade,
+                        "feedback": feedback
+                    })
+                
+                # Calculate batch statistics
+                total_students = len(results)
+                avg_score = sum(r["final_score"] for r in results) / total_students if total_students > 0 else 0
+                max_score = max(r["final_score"] for r in results) if total_students > 0 else 0
+                min_score = min(r["final_score"] for r in results) if total_students > 0 else 0
+                
+                processing_time_ms = int((time.time() - start_time) * 1000)
+                
+                # Save batch evaluation record
+                eval_id = db.save_evaluation(
+                    evaluation_type="batch",
+                    exam_name=f"Batch Evaluation - {total_students} students",
+                    final_score=round(avg_score, 2),
+                    grade=determine_grade(avg_score),
+                    processing_time_ms=processing_time_ms
+                )
+                
+                return {
+                    "evaluation_id": eval_id,
+                    "question": question_text,
+                    "reference_answer": reference[:500] + "..." if len(reference) > 500 else reference,
+                    "total_students": total_students,
+                    "average_score": round(avg_score, 2),
+                    "highest_score": round(max_score, 2),
+                    "lowest_score": round(min_score, 2),
+                    "results": results,
+                    "processing_time_ms": processing_time_ms,
+                    "auto_reference_used": auto_ref or not reference_answer
+                }
+                
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch evaluation error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Batch evaluation failed: {str(e)}")
 
 
 @app.get("/statistics")

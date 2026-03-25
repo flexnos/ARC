@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     WEIGHT_GRAMMAR: float = Field(default=0.15, env="WEIGHT_GRAMMAR")
     WEIGHT_RELEVANCE: float = Field(default=0.20, env="WEIGHT_RELEVANCE")
     
+    # CNN Settings
+    USE_CNN_BY_DEFAULT: bool = Field(default=False, env="USE_CNN_BY_DEFAULT")
+    CNN_WEIGHT: float = Field(default=0.30, env="CNN_WEIGHT")  # Weight for CNN in hybrid scoring
+    
     # OCR Settings
     OCR_MIN_TEXT_LENGTH: int = Field(default=100, env="OCR_MIN_TEXT_LENGTH")
     OCR_CONFIDENCE_THRESHOLD: float = Field(default=0.6, env="OCR_CONFIDENCE_THRESHOLD")

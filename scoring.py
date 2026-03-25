@@ -27,6 +27,7 @@ class ScoreResult:
     grade: str
     feedback: str
     detailed_metrics: Dict
+    cnn_score: Optional[float] = None  # Added for CNN scoring (optional with default)
 
 
 class GradeCalculator:
@@ -217,20 +218,32 @@ class FeedbackGenerator:
 class ScoreCalculator:
     """Main scoring calculator."""
     
-    def __init__(self):
+    def __init__(self, use_cnn: bool = False, cnn_weight: Optional[float] = None):
         self.weights = {
             'similarity': settings.WEIGHT_SIMILARITY,
             'coverage': settings.WEIGHT_COVERAGE,
             'grammar': settings.WEIGHT_GRAMMAR,
             'relevance': settings.WEIGHT_RELEVANCE
         }
+        self.use_cnn = use_cnn
+        self.cnn_weight = cnn_weight if cnn_weight is not None else settings.CNN_WEIGHT
+        # Adjust weights if using CNN
+        if use_cnn:
+            # Reduce other weights proportionally to accommodate CNN
+            scale_factor = 1.0 - self.cnn_weight
+            self.weights['similarity'] *= scale_factor
+            self.weights['coverage'] *= scale_factor
+            self.weights['grammar'] *= scale_factor
+            self.weights['relevance'] *= scale_factor
+            self.weights['cnn'] = self.cnn_weight
     
     def calculate_final_score(
         self,
         similarity: float,
         coverage: float,
         grammar: float,
-        relevance: float
+        relevance: float,
+        cnn_score: Optional[float] = None
     ) -> float:
         """Calculate weighted final score (0-10)."""
         weighted_sum = (
@@ -239,6 +252,11 @@ class ScoreCalculator:
             self.weights['grammar'] * grammar +
             self.weights['relevance'] * relevance
         )
+        
+        # Add CNN score if available and enabled
+        if self.use_cnn and cnn_score is not None:
+            weighted_sum += self.weights.get('cnn', 0) * cnn_score
+        
         return round(weighted_sum * 10, 2)
     
     def calculate_with_bonus(
@@ -247,12 +265,13 @@ class ScoreCalculator:
         coverage: float,
         grammar: float,
         relevance: float,
+        cnn_score: Optional[float] = None,
         has_diagram: bool = False,
         diagram_bonus: float = 0.5,
         max_score: float = 10.0
     ) -> Tuple[float, float]:
         """Calculate score with optional diagram bonus."""
-        base_score = self.calculate_final_score(similarity, coverage, grammar, relevance)
+        base_score = self.calculate_final_score(similarity, coverage, grammar, relevance, cnn_score)
         
         if has_diagram:
             # Apply bonus as percentage increase, not fixed points

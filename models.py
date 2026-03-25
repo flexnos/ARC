@@ -6,7 +6,7 @@ Handles loading and caching of ML models.
 import os
 import pickle
 import logging
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Tuple
 from functools import lru_cache
 
 import numpy as np
@@ -128,6 +128,115 @@ class ModelManager:
         except Exception as e:
             logger.error(f"Relevance calculation error: {e}")
             return 0.5
+    
+    def _preprocess_for_cnn(self, text1: str, text2: str, max_length: int = 100) -> Tuple[np.ndarray, np.ndarray]:
+        """Preprocess two texts for CNN model input.
+        
+        Args:
+            text1: First text (e.g., reference answer)
+            text2: Second text (e.g., student answer)
+            max_length: Maximum sequence length for padding/truncation
+            
+        Returns:
+            Tuple of (sequence1, sequence2) as numpy arrays
+        """
+        if not self.tokenizer:
+            raise ValueError("Tokenizer not loaded")
+        
+        # Tokenize both texts
+        seq1 = self.tokenizer.texts_to_sequences([text1])[0]
+        seq2 = self.tokenizer.texts_to_sequences([text2])[0]
+        
+        # Pad or truncate to max_length
+        def pad_sequence(seq, maxlen):
+            if len(seq) > maxlen:
+                return seq[:maxlen]
+            elif len(seq) < maxlen:
+                return seq + [0] * (maxlen - len(seq))
+            return seq
+        
+        seq1_padded = pad_sequence(seq1, max_length)
+        seq2_padded = pad_sequence(seq2, max_length)
+        
+        return np.array([seq1_padded]), np.array([seq2_padded])
+    
+    def compute_cnn_score(
+        self,
+        reference: str,
+        student: str,
+        max_length: int = 100
+    ) -> float:
+        """Compute similarity score using CNN model.
+        
+        Args:
+            reference: Reference answer text
+            student: Student answer text
+            max_length: Maximum sequence length for tokenization
+            
+        Returns:
+            Score between 0 and 1
+        """
+        if not self.cnn_model:
+            logger.warning("CNN model not available")
+            return 0.0
+        
+        if not self.tokenizer:
+            logger.warning("Tokenizer not available for CNN")
+            return 0.0
+        
+        try:
+            # Preprocess texts
+            ref_seq, student_seq = self._preprocess_for_cnn(reference, student, max_length)
+            
+            # Predict using CNN
+            prediction = self.cnn_model.predict([ref_seq, student_seq], verbose=0)
+            
+            # Assuming model outputs probability/score in [0, 1]
+            score = float(prediction[0][0])
+            
+            # Ensure score is in valid range
+            score = max(0.0, min(1.0, score))
+            
+            logger.debug(f"CNN score: {score:.3f} for reference='{reference[:50]}...' student='{student[:50]}...'")
+            
+            return round(score, 3)
+            
+        except Exception as e:
+            logger.error(f"CNN scoring error: {e}")
+            return 0.0
+    
+    def compute_hybrid_score(
+        self,
+        reference: str,
+        student: str,
+        question: Optional[str] = None,
+        cnn_weight: float = 0.4,
+        transformer_weight: float = 0.6,
+        model_name: Optional[str] = None
+    ) -> float:
+        """Compute hybrid score combining CNN and Sentence Transformers.
+        
+        Args:
+            reference: Reference answer text
+            student: Student answer text
+            question: Optional question text for relevance
+            cnn_weight: Weight for CNN score (0-1)
+            transformer_weight: Weight for transformer similarity (0-1)
+            model_name: Optional model name for transformer
+            
+        Returns:
+            Combined score between 0 and 1
+        """
+        # Get individual scores
+        cnn_score = self.compute_cnn_score(reference, student)
+        transformer_score = self.compute_similarity(reference, student, model_name)
+        
+        # Combine scores
+        hybrid = (cnn_weight * cnn_score) + (transformer_weight * transformer_score)
+        
+        logger.debug(f"Hybrid score: {hybrid:.3f} (CNN: {cnn_score:.3f}, Transformer: {transformer_score:.3f})")
+        
+        return round(hybrid, 3)
     
     def get_available_models(self) -> Dict[str, bool]:
         """Get list of available models."""
