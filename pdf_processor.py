@@ -59,7 +59,7 @@ class PDFTextExtractor:
             raise PDFProcessingError(f"Failed to extract text from PDF: {str(e)}")
     
     @staticmethod
-    def extract_images(pdf_bytes: bytes, dpi: int = 200) -> Dict[int, List[Image.Image]]:
+    def extract_images(pdf_bytes: bytes, dpi: int = 300) -> Dict[int, List[Image.Image]]:
         """Extract images from PDF pages for OCR."""
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -87,6 +87,33 @@ class OCRProcessor:
     """Process images with OCR."""
     
     PSM_MODES = [6, 3, 4, 11]  # Page segmentation modes to try
+    _easyocr_reader = None
+
+    @staticmethod
+    def _quality_score(text: str) -> float:
+        """Heuristic quality score to reject gibberish OCR outputs."""
+        if not text:
+            return -1e9
+        t = text.strip()
+        if len(t) < 10:
+            return -1e6
+
+        total = len(t)
+        alpha = sum(1 for c in t if c.isalpha())
+        alnum = sum(1 for c in t if c.isalnum())
+        spaces = sum(1 for c in t if c.isspace())
+        punct = total - alnum - spaces
+        words = len([w for w in t.split() if w])
+
+        alpha_ratio = alpha / total
+        punct_ratio = punct / total
+
+        return (
+            min(total, 2000) * 0.001
+            + alpha_ratio * 3.0
+            + min(words, 250) * 0.01
+            - punct_ratio * 2.0
+        )
     
     @classmethod
     def preprocess_image(cls, image: Image.Image) -> Image.Image:
@@ -139,8 +166,37 @@ class OCRProcessor:
             configs = [f'--psm {psm} --oem 3' for psm in cls.PSM_MODES]
         
         preprocessed = cls.preprocess_image(image)
-        best_text = ""
-        best_confidence = 0.0
+        candidates: List[Tuple[str, float]] = []
+
+        # Try EasyOCR first (works better on many handwritten cases)
+        try:
+            import easyocr
+            if cls._easyocr_reader is None:
+                cls._easyocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+
+            for variant in [image.convert("RGB"), preprocessed.convert("RGB")]:
+                arr = np.array(variant)
+                for kwargs in [
+                    {"paragraph": True},
+                    {"paragraph": True, "decoder": "beamsearch"},
+                    {"paragraph": False},
+                ]:
+                    try:
+                        result = cls._easyocr_reader.readtext(arr, **kwargs)
+                    except TypeError:
+                        result = cls._easyocr_reader.readtext(arr)
+                    except Exception:
+                        continue
+
+                    chunks = [r[1].strip() for r in result if len(r) >= 2 and isinstance(r[1], str) and r[1].strip()]
+                    confs = [float(r[2]) for r in result if len(r) >= 3 and isinstance(r[2], (float, int))]
+                    text = " ".join(chunks).strip()
+                    if text:
+                        avg_conf = sum(confs) / len(confs) if confs else 0.5
+                        combined = cls._quality_score(text) + avg_conf
+                        candidates.append((text, combined))
+        except Exception:
+            pass
         
         for config in configs:
             try:
@@ -159,18 +215,27 @@ class OCRProcessor:
                 except Exception:
                     avg_confidence = 50  # Default if confidence extraction fails
                 
-                # Score based on confidence and text length
-                score = (avg_confidence * 0.6) + (min(len(extracted), 1000) / 1000 * 40)
-                
-                if score > best_confidence and len(extracted.strip()) > 10:
-                    best_text = extracted
-                    best_confidence = score
+                cleaned = extracted.strip()
+                if cleaned:
+                    combined = cls._quality_score(cleaned) + (avg_confidence / 100.0)
+                    candidates.append((cleaned, combined))
                     
             except Exception as e:
                 logger.warning(f"OCR with config '{config}' failed: {e}")
                 continue
-        
-        return best_text, best_confidence / 100  # Normalize to 0-1
+
+        if not candidates:
+            return "", 0.0
+
+        best_text, best_score = max(candidates, key=lambda x: x[1])
+        near_best = [text for text, score in candidates if score >= (best_score - 0.25)]
+        if near_best:
+            longest_near_best = max(near_best, key=len)
+            if len(longest_near_best) > len(best_text):
+                best_text = longest_near_best
+        # Map heuristic score into a rough 0-1 confidence band.
+        confidence = max(0.0, min(1.0, (best_score + 1.0) / 5.0))
+        return best_text, confidence
     
     @classmethod
     def detect_diagram(cls, image: Image.Image) -> bool:
@@ -404,11 +469,18 @@ class PDFProcessor:
         # Extract text
         pages = self.text_extractor.extract_text(pdf_bytes)
         total_text = ' '.join(pages.values())
+
+        # If extracted text looks low-quality (common for scanned handwritten PDFs),
+        # fall back to OCR even if length passes the threshold.
+        try:
+            extracted_quality = self.ocr_processor._quality_score(total_text)
+        except Exception:
+            extracted_quality = -1e9
         
         # Use OCR if text is too sparse
-        if len(total_text.strip()) < use_ocr_threshold:
+        if len(total_text.strip()) < use_ocr_threshold or extracted_quality < 0.5:
             logger.info("Text extraction yielded sparse results, running OCR...")
-            images = self.text_extractor.extract_images(pdf_bytes)
+            images = self.text_extractor.extract_images(pdf_bytes, dpi=300)
             
             ocr_texts = []
             for page_num, page_images in images.items():

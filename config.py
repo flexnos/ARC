@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     OCR_MIN_TEXT_LENGTH: int = Field(default=100, env="OCR_MIN_TEXT_LENGTH")
     OCR_CONFIDENCE_THRESHOLD: float = Field(default=0.6, env="OCR_CONFIDENCE_THRESHOLD")
     
+    # LLM Settings (Google Gemini)
+    GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
+    GEMINI_MODEL: str = Field(default="gemini-2.0-flash-exp", env="GEMINI_MODEL")
+    USE_LLM_FOR_REFERENCE: bool = Field(default=True, env="USE_LLM_FOR_REFERENCE")
+    LLM_MAX_TOKENS: int = Field(default=500, env="LLM_MAX_TOKENS")
+    LLM_TEMPERATURE: float = Field(default=0.3, env="LLM_TEMPERATURE")  # Lower for more focused answers
+    
     # Database
     DATABASE_URL: Optional[str] = Field(default="sqlite:///./evaluations.db", env="DATABASE_URL")
     

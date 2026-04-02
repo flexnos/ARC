@@ -1,6 +1,7 @@
 """
 Module for automatically generating reference answers from question papers.
 Uses AI models to generate reference answers based on questions extracted from PDFs.
+Now enhanced with Google Gemini LLM support!
 """
 
 import logging
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from models import get_model_manager
 from pdf_processor import get_pdf_processor, ExtractedQuestion
 from config import get_settings
+from gemini_service import get_gemini_service
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -29,10 +31,12 @@ class ReferenceAnswerGenerator:
     def __init__(self):
         self.model_manager = get_model_manager()
         self.pdf_processor = get_pdf_processor()
+        self.gemini_service = get_gemini_service()  # NEW: Gemini LLM support
         
     def generate_reference_answer(self, question: str, max_length: int = 500) -> GeneratedReference:
         """
         Generate a reference answer for a given question using AI models.
+        Now with Google Gemini LLM support for high-quality answers!
         
         Args:
             question: The question text
@@ -42,17 +46,25 @@ class ReferenceAnswerGenerator:
             GeneratedReference with the answer and confidence score
         """
         try:
-            # Use the model to generate a reference answer
-            # We'll use a prompt to guide the model to generate a good answer
-            prompt = f"Provide a comprehensive answer to the following question: {question}"
+            # PRIORITY 1: Try to use Gemini LLM if available (real AI generation)
+            if settings.USE_LLM_FOR_REFERENCE and self.gemini_service.is_available():
+                logger.info(f"Using Gemini LLM to generate reference answer for: {question[:50]}...")
+                
+                gemini_answer = self.gemini_service.generate_reference_answer(question, max_length)
+                
+                if gemini_answer:
+                    # Successfully generated with LLM
+                    logger.info("✅ Gemini LLM generated reference answer successfully")
+                    return GeneratedReference(
+                        question_number=0,
+                        generated_answer=gemini_answer,
+                        confidence=0.9  # High confidence for LLM-generated answers
+                    )
+                else:
+                    logger.warning("Gemini returned empty answer, falling back to heuristic method")
             
-            # For now, we'll use semantic similarity to simulate generation
-            # In a real implementation, we'd use a generative model like GPT or similar
-            # For this implementation, we'll generate a reference answer by expanding the question
-            # and using the model's understanding to create a plausible answer
-            
-            # Simulate a generated answer by combining the question with related concepts
-            # In a real scenario, this would involve a generative model
+            # FALLBACK: Use heuristic-based generation (original method)
+            logger.info("Using heuristic-based reference generation (fallback)")
             question_embedding = self.model_manager.get_sentence_transformer().encode(question)
             
             # Generate a simple reference answer based on the question

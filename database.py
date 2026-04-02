@@ -8,7 +8,9 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, Column, String, Float, DateTime, Text, Integer
+import json
+from sqlalchemy import create_engine, Column, String, Float, DateTime, Text, Integer, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -36,6 +38,7 @@ class EvaluationRecord(Base):
     final_score = Column(Float, nullable=True)
     grade = Column(String(10), nullable=True)
     feedback = Column(Text, nullable=True)
+    metrics = Column(Text, nullable=True)
     evaluation_type = Column(String(50), default="single")  # single, batch, pdf, image
     processing_time_ms = Column(Integer, nullable=True)
 
@@ -49,6 +52,15 @@ class DatabaseManager:
             self.database_url,
             connect_args={"check_same_thread": False} if self.database_url.startswith("sqlite") else {}
         )
+
+        # Ensure schema is up-to-date (add metrics column for existing DBs)
+        if self.database_url.startswith("sqlite"):
+            with self.engine.connect() as conn:
+                res = conn.execute(text("PRAGMA table_info(evaluations)"))
+                columns = [row[1] for row in res.fetchall()]
+                if "metrics" not in columns:
+                    conn.execute(text("ALTER TABLE evaluations ADD COLUMN metrics TEXT"))
+
         Base.metadata.create_all(self.engine)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
     
@@ -79,6 +91,7 @@ class DatabaseManager:
                        final_score: Optional[float] = None,
                        grade: Optional[str] = None,
                        feedback: Optional[str] = None,
+                       metrics: Optional[Dict[str, Any]] = None,
                        processing_time_ms: Optional[int] = None) -> str:
         """Save an evaluation record to the database."""
         with self.get_session() as session:
@@ -96,11 +109,41 @@ class DatabaseManager:
                 final_score=final_score,
                 grade=grade,
                 feedback=feedback,
+                metrics=json.dumps(metrics) if metrics is not None else None,
                 processing_time_ms=processing_time_ms
             )
             session.add(record)
-            session.flush()
-            return record.id
+            try:
+                session.flush()
+                return record.id
+            except OperationalError as err:
+                if "no column named metrics" in str(err):
+                    # backward compat: add missing column and retry once
+                    with self.engine.connect() as conn:
+                        conn.execute("ALTER TABLE evaluations ADD COLUMN metrics TEXT")
+                    session.rollback()
+                    with self.get_session() as retry_session:
+                        retry_record = EvaluationRecord(
+                            evaluation_type=evaluation_type,
+                            student_name=student_name,
+                            exam_name=exam_name,
+                            question=question,
+                            student_answer=student_answer,
+                            reference_answer=reference_answer,
+                            similarity_score=similarity_score,
+                            coverage_score=coverage_score,
+                            grammar_score=grammar_score,
+                            relevance_score=relevance_score,
+                            final_score=final_score,
+                            grade=grade,
+                            feedback=feedback,
+                            metrics=json.dumps(metrics) if metrics is not None else None,
+                            processing_time_ms=processing_time_ms
+                        )
+                        retry_session.add(retry_record)
+                        retry_session.flush()
+                        return retry_record.id
+                raise
     
     def get_evaluation(self, evaluation_id: str) -> Optional[Dict[str, Any]]:
         """Get a single evaluation by ID."""
@@ -170,7 +213,8 @@ class DatabaseManager:
             "grade": record.grade,
             "feedback": record.feedback,
             "evaluation_type": record.evaluation_type,
-            "processing_time_ms": record.processing_time_ms
+            "processing_time_ms": record.processing_time_ms,
+            "metrics": json.loads(record.metrics) if record.metrics else None
         }
 
 

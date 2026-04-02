@@ -101,7 +101,10 @@ class ModelManager:
             student_emb = model.encode(student, convert_to_tensor=True)
             similarity = util.cos_sim(ref_emb, student_emb).item()
             # Normalize to 0-1 range
-            return round((similarity + 1) / 2, 3)
+            normalized = round((similarity + 1) / 2, 3)
+            if reference.strip() and student.strip():
+                return max(0.05, normalized)
+            return normalized
         except Exception as e:
             logger.error(f"Similarity calculation error: {e}")
             return 0.0
@@ -124,7 +127,10 @@ class ModelManager:
             a_emb = model.encode(answer, convert_to_tensor=True)
             relevance = util.cos_sim(q_emb, a_emb).item()
             # Normalize to 0-1 range
-            return round((relevance + 1) / 2, 3)
+            normalized = round((relevance + 1) / 2, 3)
+            if question.strip() and answer.strip():
+                return max(0.05, normalized)
+            return normalized
         except Exception as e:
             logger.error(f"Relevance calculation error: {e}")
             return 0.5
