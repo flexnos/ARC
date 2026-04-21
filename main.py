@@ -1369,6 +1369,25 @@ async def log_ref_answers(data: RefLogRequest):
         return {"status": "error"}
 
 
+@app.get("/history")
+async def get_history(limit: int = 20, evaluation_type: Optional[str] = None):
+    """Get recent evaluation history for score trend chart."""
+    db = get_db_manager()
+    records = db.get_evaluations(evaluation_type=evaluation_type, limit=limit)
+    return [
+        {
+            "id": r["id"],
+            "timestamp": r["timestamp"],
+            "evaluation_type": r["evaluation_type"],
+            "final_score": r["final_score"],
+            "grade": r["grade"],
+            "student_name": r["student_name"],
+            "question": r["question"][:80] if r["question"] else None,
+        }
+        for r in records if r["final_score"] is not None
+    ]
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=settings.HOST, port=settings.PORT)
