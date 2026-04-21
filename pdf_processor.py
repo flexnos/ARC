@@ -322,8 +322,10 @@ class AnswerParser:
     ]
     
     MARKS_PATTERNS = [
-        r'(?i)(?:\(|\[)(\d+)\s*(?:marks?|m)(?:\)|\])',
+        r'(?i)\[(\d+)\s*(?:marks?|m)\]',
+        r'(?i)\((\d+)\s*(?:marks?|m)\)',
         r'(?i)marks?\s*[:=]?\s*(\d+)',
+        r'(?i)(\d+)\s*marks?',
     ]
     
     @classmethod
@@ -332,42 +334,51 @@ class AnswerParser:
         questions = []
         lines = text.split('\n')
         current_q = None
-        
+        current_marks_found = False
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-            
+
             # Try to match question pattern
             q_match = None
             for pattern in cls.QUESTION_PATTERNS:
                 q_match = re.match(pattern, line)
                 if q_match:
                     break
-            
-            # Try to match marks pattern
-            marks = 5  # default
+
+            # Try to match marks pattern on this line
+            marks = None
             for pattern in cls.MARKS_PATTERNS:
                 marks_match = re.search(pattern, line)
                 if marks_match:
                     marks = int(marks_match.group(1))
                     break
-            
+
             if q_match:
                 if current_q:
                     questions.append(current_q)
                 current_q = ExtractedQuestion(
                     number=int(q_match.group(1)),
                     text=q_match.group(2).strip(),
-                    marks=marks
+                    marks=marks if marks is not None else 5  # default
                 )
+                current_marks_found = marks is not None
             elif current_q and line:
-                # Append to current question text
+                # Append continuation line to current question text
                 current_q.text += ' ' + line
-        
+                # Update marks if found on a continuation line and not yet found
+                if not current_marks_found and marks is not None:
+                    current_q.marks = marks
+                    current_marks_found = True
+                elif marks is not None:
+                    # Always take the last marks value found (overrides default)
+                    current_q.marks = marks
+
         if current_q:
             questions.append(current_q)
-        
+
         return questions
     
     @classmethod
@@ -378,39 +389,70 @@ class AnswerParser:
         next_question_num: Optional[int] = None
     ) -> str:
         """Extract student answer for specific question number."""
-        # Build end pattern
+        # End boundary: start of next question or end of string
         if next_question_num:
-            pattern_end = fr'(?:q\.?\s*{next_question_num}|question\s*{next_question_num}|{next_question_num}\.)'
+            pattern_end = (
+                rf'(?:q\.?\s*{next_question_num}[\s:.\)]'
+                rf'|question\s*{next_question_num}[\s:.\)]'
+                rf'|(?:^|\s){next_question_num}[.:\)]\s)'
+            )
         else:
             pattern_end = r'\Z'
-        
-        # Try different patterns
-        patterns = [
-            rf'(?i)q\.?\s*{question_num}[\s:.\)]+(.+?)(?={pattern_end})',
-            rf'(?i)question\s*{question_num}[\s:.\)]+(.+?)(?={pattern_end})',
-            rf'(?i){question_num}\.?\s+(.+?)(?={pattern_end})',
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, all_text, re.DOTALL)
-            if match:
-                answer = match.group(1).strip()
+
+        # Patterns ordered from most specific to least
+        # Handles: Q1. Q1: Q1) Q 1. question 1. 1. 1)
+        # Also skips the question text itself and captures from Ans: onward if present
+        q_header = (
+            rf'(?i)(?:q\.?\s*{question_num}|question\s*{question_num}'
+            rf'|(?:^|\n)\s*{question_num}[.:\)])'
+            rf'[^\n]*\n'  # skip the question line
+        )
+        # Try to find "Ans:" marker after question header
+        ans_pattern = rf'{q_header}(?:ans\s*[:\-]?\s*\n?)?(.+?)(?={pattern_end})'
+        match = re.search(ans_pattern, all_text, re.DOTALL | re.IGNORECASE)
+        if match:
+            answer = match.group(1).strip()
+            # Strip leading "Ans:" if OCR merged it onto the same line
+            answer = re.sub(r'^(?i)ans\s*[:\-]?\s*', '', answer).strip()
+            if len(answer) >= 10:
                 return TextCleaner.clean(answer)
-        
+
         # Fallback: line-by-line parsing
         lines = all_text.split('\n')
         in_answer = False
+        skip_next = False  # skip the "Ans:" line itself
         answer_lines = []
-        
+
+        q_patterns = [
+            rf'(?i)^\s*q\.?\s*{question_num}[\s:.\)]',
+            rf'(?i)^\s*question\s*{question_num}[\s:.\)]',
+            rf'(?i)^\s*{question_num}[.:\)]\s',
+        ]
+        next_q_patterns = []
+        if next_question_num:
+            next_q_patterns = [
+                rf'(?i)^\s*q\.?\s*{next_question_num}[\s:.\)]',
+                rf'(?i)^\s*question\s*{next_question_num}[\s:.\)]',
+                rf'(?i)^\s*{next_question_num}[.:\)]\s',
+            ]
+
         for line in lines:
-            if re.search(rf'(?i)q\.?\s*{question_num}[\s:.\)]', line):
-                in_answer = True
-                continue
-            if next_question_num and re.search(rf'(?i)q\.?\s*{next_question_num}[\s:.\)]', line):
+            # Check if we've hit the next question
+            if next_q_patterns and any(re.search(p, line) for p in next_q_patterns):
                 break
-            if in_answer:
+            if not in_answer:
+                if any(re.search(p, line) for p in q_patterns):
+                    in_answer = True
+                    skip_next = False
+                    continue
+            else:
+                # Skip standalone "Ans:" lines
+                if re.match(r'(?i)^\s*ans\s*[:\-]?\s*$', line):
+                    continue
+                # Strip inline "Ans:" prefix
+                line = re.sub(r'(?i)^\s*ans\s*[:\-]?\s*', '', line)
                 answer_lines.append(line)
-        
+
         return TextCleaner.clean(' '.join(answer_lines))
     
     @classmethod

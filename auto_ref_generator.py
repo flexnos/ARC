@@ -151,9 +151,16 @@ class ReferenceAnswerGenerator:
         return references
 
 
+# Singleton instance
+_reference_generator: Optional[ReferenceAnswerGenerator] = None
+
+
 def get_reference_generator() -> ReferenceAnswerGenerator:
-    """Get or create the reference answer generator instance."""
-    return ReferenceAnswerGenerator()
+    """Get or create the reference answer generator singleton."""
+    global _reference_generator
+    if _reference_generator is None:
+        _reference_generator = ReferenceAnswerGenerator()
+    return _reference_generator
 
 
 # Example usage and testing

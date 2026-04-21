@@ -76,11 +76,19 @@ rate_limiter = RateLimiter()
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from request."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Extract client IP from request, only trusting X-Forwarded-For from known proxies."""
+    # Only trust X-Forwarded-For if the direct client is a known private/loopback address
+    direct_ip = request.client.host if request.client else None
+    _private_prefixes = ("127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                         "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+                         "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+                         "172.30.", "172.31.", "192.168.", "::1")
+    is_trusted_proxy = direct_ip and (direct_ip.startswith(_private_prefixes))
+    if is_trusted_proxy:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return direct_ip or "unknown"
 
 
 def rate_limit():

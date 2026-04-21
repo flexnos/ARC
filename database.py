@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 
 import json
+import sqlalchemy
 from sqlalchemy import create_engine, Column, String, Float, DateTime, Text, Integer, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
@@ -120,7 +121,8 @@ class DatabaseManager:
                 if "no column named metrics" in str(err):
                     # backward compat: add missing column and retry once
                     with self.engine.connect() as conn:
-                        conn.execute("ALTER TABLE evaluations ADD COLUMN metrics TEXT")
+                        conn.execute(text("ALTER TABLE evaluations ADD COLUMN metrics TEXT"))
+                        conn.commit()
                     session.rollback()
                     with self.get_session() as retry_session:
                         retry_record = EvaluationRecord(
@@ -228,6 +230,3 @@ def get_db_manager() -> DatabaseManager:
     if db_manager is None:
         db_manager = DatabaseManager()
     return db_manager
-
-
-import sqlalchemy

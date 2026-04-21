@@ -4,6 +4,7 @@ Professional production-ready API with auto-reference generation and LLM scoring
 """
 
 import time
+import asyncio
 import logging
 import re
 from difflib import SequenceMatcher
@@ -22,7 +23,9 @@ from models import get_model_manager
 from scoring import ScoreCalculator, determine_grade, grammar_score, coverage_score, generate_feedback, perform_gap_analysis, GeminiEnhancedScorer
 from database import get_db_manager
 from pdf_processor import get_pdf_processor, OCRProcessor
+from security import FileValidator
 from auto_ref_generator import get_reference_generator
+from demo_data import generate_demo_ocr_response, generate_demo_batch_response, generate_demo_pdf_response, generate_demo_text_response, generate_demo_cs_pdf_response
 
 settings = get_settings()
 
@@ -45,31 +48,6 @@ def _get_llm_usage_stats() -> Dict[str, Any]:
         "remaining_calls": max(0, 1500 - usage_count)
     }
 
-
-def _score_ocr_candidate(text: str) -> float:
-    """Heuristic scoring to pick the least-gibberish OCR output."""
-    if not text:
-        return -1e9
-    t = text.strip()
-    if len(t) < 10:
-        return -1e6
-
-    total = len(t)
-    alpha = sum(1 for c in t if c.isalpha())
-    alnum = sum(1 for c in t if c.isalnum())
-    spaces = sum(1 for c in t if c.isspace())
-    punct = total - alnum - spaces
-
-    alpha_ratio = alpha / total
-    punct_ratio = punct / total
-    word_count = len([w for w in t.split() if w])
-
-    return (
-        min(total, 2000) * 0.001
-        + alpha_ratio * 3.0
-        + min(word_count, 250) * 0.01
-        - punct_ratio * 2.0
-    )
 
 
 def _enhance_ocr_with_llm_vision(pil_img, ocr_text: str) -> str:
@@ -212,7 +190,7 @@ def get_scoring_metrics(reference: str, student: str, question: str, model_name:
     
     if use_cnn:
         metrics["cnn_score"] = model_manager.compute_cnn_score(reference, student)
-    
+
     return metrics
 
 
@@ -274,10 +252,6 @@ async def evaluate(request: Request, data: AnswerRequest):
     
     calculator = ScoreCalculator(use_cnn=use_cnn)
     final_score = calculator.calculate_final_score(**metrics)
-    
-    if use_cnn and "cnn_score" in metrics:
-        final_score = final_score * 0.7 + metrics["cnn_score"] * 10 * 0.3
-    
     grade = determine_grade(final_score)
     
     if llm_result and llm_result.get('feedback'):
@@ -392,10 +366,12 @@ async def evaluate_ocr(
     try:
         if not image.content_type or not image.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
-        
+
         image_bytes = await image.read()
+        FileValidator.validate_file_size(image_bytes)
+        FileValidator.validate_file_type(image_bytes)
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        
+
         # Try EasyOCR first
         try:
             ocr_result = _ocr_with_easyocr(pil_img)
@@ -496,10 +472,12 @@ async def evaluate_ocr_fast(
     try:
         if not image.content_type or not image.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
-        
+
         image_bytes = await image.read()
+        FileValidator.validate_file_size(image_bytes)
+        FileValidator.validate_file_type(image_bytes)
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        
+
         # Fast OCR using pytesseract
         extracted_text = _ocr_fast(pil_img)
         
@@ -564,10 +542,12 @@ async def evaluate_ocr_accurate(
     try:
         if not image.content_type or not image.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="File must be an image")
-        
+
         image_bytes = await image.read()
+        FileValidator.validate_file_size(image_bytes)
+        FileValidator.validate_file_type(image_bytes)
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        
+
         # Preprocess based on mode
         if preprocessing == "handwriting":
             # Enhance contrast and sharpen for handwriting
@@ -674,6 +654,196 @@ async def evaluate_ocr_accurate(
         raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
 
 
+# ============= DEMO MODE ENDPOINTS =============
+
+@app.post("/evaluate/pdf-handwritten-demo")
+async def evaluate_pdf_handwritten_demo(
+    use_llm: bool = Form(False),
+    mode: str = Form("fast")
+):
+    """DEMO MODE - Evaluate using sample PDFs from project directory."""
+    import io
+    import fitz
+    from PIL import Image
+    
+    start_time = time.time()
+    
+    try:
+        # Load sample PDFs from project directory
+        with open("sample_student_answers.pdf", "rb") as f:
+            answer_pdf_bytes = f.read()
+        
+        with open("sample_question_paper.pdf", "rb") as f:
+            question_pdf_bytes = f.read()
+        
+        # Process question paper
+        processor = get_pdf_processor()
+        questions = processor.process_question_paper(question_pdf_bytes)
+        
+        if not questions:
+            raise HTTPException(status_code=400, detail="No questions found in sample question paper")
+        
+        # OCR the handwritten answers
+        doc = fitz.open(stream=answer_pdf_bytes, filetype="pdf")
+        extracted_chunks = []
+        
+        dpi = 150 if mode == "fast" else 250
+        
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            pix = page.get_pixmap(dpi=dpi)
+            img_data = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_data)).convert("RGB")
+            
+            if mode == "fast":
+                text = _ocr_fast(img)
+            else:
+                ocr_result = _ocr_with_easyocr(img)
+                text = ocr_result.get("best_text", "")
+                if use_llm and text:
+                    text = _enhance_ocr_with_llm_vision(img, text)
+            
+            if text:
+                extracted_chunks.append(text)
+        
+        doc.close()
+        extracted_text = " ".join(extracted_chunks).strip()
+        
+        if not extracted_text:
+            raise HTTPException(status_code=400, detail="No text could be extracted from sample PDFs")
+        
+        student_answer_text = sanitize_text(extracted_text[:10000], max_length=10000)
+        
+        # Generate references and score
+        generator = get_reference_generator()
+        ref_answers = generator.generate_references_for_questions(questions)
+        
+        llm_scorer = GeminiEnhancedScorer() if use_llm else None
+        
+        results = []
+        total_obtained = 0.0
+        total_marks = sum(q.marks for q in questions)
+        llm_used_count = 0
+        
+        calculator = ScoreCalculator()
+        
+        for idx, q in enumerate(questions):
+            next_q_num = questions[idx + 1].number if idx + 1 < len(questions) else None
+            extracted_ans = processor.answer_parser.extract_answer_for_question(student_answer_text, q.number, next_q_num)
+            ref_ans = ref_answers.get(q.number, "")
+            
+            if not extracted_ans or len(extracted_ans) < 10:
+                similarity = coverage = obtained = 0.0
+                feedback = "No answer detected"
+            elif not ref_ans:
+                similarity = coverage = 0.5
+                obtained = q.marks * 0.5
+                feedback = "Reference unavailable"
+            else:
+                similarity = get_model_manager().compute_similarity(ref_ans, extracted_ans)
+                coverage = coverage_score(ref_ans, extracted_ans)
+                grammar = grammar_score(extracted_ans)
+                relevance = get_model_manager().compute_relevance(q.text, extracted_ans)
+                
+                llm_result = None
+                if use_llm and llm_scorer:
+                    llm_result = llm_scorer.score_with_gemini(q.text, ref_ans, extracted_ans)
+                    if llm_result:
+                        llm_used_count += 1
+                        if 'coverage' in llm_result:
+                            coverage = coverage * 0.7 + llm_result['coverage'] * 0.3
+                        if 'relevance' in llm_result:
+                            relevance = relevance * 0.7 + llm_result['relevance'] * 0.3
+                
+                final_score_normalized = calculator.calculate_final_score(similarity, coverage, grammar, relevance)
+                obtained = (final_score_normalized / 10.0) * q.marks
+                
+                percentage = (obtained / q.marks) * 100 if q.marks > 0 else 0
+                
+                if percentage >= 90:
+                    feedback = "Excellent!"
+                elif percentage >= 75:
+                    feedback = "Good"
+                elif percentage >= 60:
+                    feedback = "Satisfactory"
+                else:
+                    feedback = "Needs improvement"
+            
+            results.append({
+                "question_number": q.number,
+                "question_text": q.text[:200],
+                "extracted_answer": extracted_ans[:500] if extracted_ans else "No answer",
+                "generated_reference": ref_ans[:300] if ref_ans else "No reference",
+                "max_marks": q.marks,
+                "obtained_marks": round(obtained, 2),
+                "similarity_score": round(similarity, 3),
+                "coverage_score": round(coverage, 3),
+                "feedback": feedback
+            })
+            total_obtained += obtained
+        
+        percentage = (total_obtained / total_marks) * 100 if total_marks > 0 else 0
+        grade = determine_grade(percentage, max_score=100)
+        
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        
+        return {
+            "questions_results": results,
+            "total_score": round(total_obtained, 2),
+            "total_marks": total_marks,
+            "percentage": round(percentage, 2),
+            "grade": grade,
+            "extracted_text": student_answer_text,
+            "processing_time_ms": processing_time_ms,
+            "llm_used": llm_used_count > 0,
+            "demo_mode": True,
+            "sample_pdfs_used": True
+        }
+        
+    except Exception as e:
+        logger.error(f"Demo PDF evaluation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Demo processing failed: {str(e)}")
+
+
+@app.post("/evaluate/ocr-demo")
+async def evaluate_ocr_demo(
+    subject: str = Form("general")
+):
+    """DEMO MODE - Return preset OCR evaluation results for demonstration."""
+    await asyncio.sleep(0.5)
+    return generate_demo_ocr_response(subject)
+
+
+@app.post("/evaluate/batch-demo")
+async def evaluate_batch_demo():
+    """DEMO MODE - Return preset batch evaluation results for demonstration."""
+    await asyncio.sleep(1.0)
+    return generate_demo_batch_response()
+
+
+@app.post("/evaluate/pdf-demo")
+async def evaluate_pdf_demo():
+    """DEMO MODE - Return preset PDF handwritten evaluation results."""
+    await asyncio.sleep(1.0)
+    return generate_demo_pdf_response()
+
+
+@app.post("/evaluate/cs-pdf-demo")
+async def evaluate_cs_pdf_demo():
+    """DEMO MODE - Return preset CS PDF evaluation results with gap analysis."""
+    await asyncio.sleep(1.0)
+    return generate_demo_cs_pdf_response()
+
+
+@app.post("/evaluate/text-demo")
+async def evaluate_text_demo(
+    subject: str = Form("general")
+):
+    """DEMO MODE - Return preset text evaluation results."""
+    await asyncio.sleep(0.8)
+    return generate_demo_text_response(subject)
+
+
 # ============= PDF HANDWRITTEN ENDPOINTS =============
 
 @app.post("/evaluate/pdf-handwritten")
@@ -694,8 +864,9 @@ async def evaluate_pdf_handwritten(
     try:
         if not pdf.filename.lower().endswith('.pdf'):
             raise HTTPException(status_code=400, detail="File must be a PDF")
-        
+
         pdf_bytes = await pdf.read()
+        FileValidator.validate_file_size(pdf_bytes)
         
         # OCR the handwritten PDF to get full text
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -920,11 +1091,12 @@ async def evaluate_batch(
     try:
         if not batch_file.filename.lower().endswith('.zip'):
             raise HTTPException(status_code=400, detail="File must be a ZIP archive")
-        
+
         import zipfile
         import io
-        
+
         zip_content = await batch_file.read()
+        FileValidator.validate_file_size(zip_content)
         
         with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
             file_list = zip_file.namelist()

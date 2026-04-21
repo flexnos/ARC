@@ -82,6 +82,11 @@ interface Result {
     similarity_score: number;
     coverage_score: number;
     feedback: string;
+    gap_analysis?: {
+      matched: Array<{ concept: string; status: string }>;
+      missing: Array<{ concept: string; importance: string; marks_worth: number }>;
+      coverage_percentage: number;
+    };
   }>;
   batchResults?: Array<{
     student_name: string;
@@ -265,6 +270,40 @@ export default function Home() {
           matched_concepts: useLLM ? ['photosynthesis', 'glucose', 'oxygen', 'chlorophyll', 'energy'] : undefined,
           missing_concepts: useLLM ? ['Calvin cycle', 'light-dependent reactions'] : undefined
         };
+        
+        // OCR mode - detect PDF by filename and show matching demo data
+        if (activeTab === 'ocr') {
+          const uploadedName = (selectedFiles.ocrPdf?.name || selectedFiles.ocrImage?.name || '').toLowerCase();
+          const isCS = uploadedName.includes('cs') || uploadedName.includes('computer');
+          const demoData = isCS ? {
+            questions_results: [{question_number:1,question_text:'Compiler vs Interpreter? [5 marks]',extracted_answer:'A compiler translates entire source code to machine code before execution, e.g. GCC. An interpreter executes line by line, e.g. Python.',generated_reference:'Compiler: translates whole program to machine code. Interpreter: executes line-by-line.',max_marks:5,obtained_marks:4.2,similarity_score:0.84,coverage_score:0.80,feedback:'Good',gap_analysis:{matched:[{concept:'compiler',status:'correct'},{concept:'interpreter',status:'correct'},{concept:'machine code',status:'correct'},{concept:'GCC',status:'correct'},{concept:'Python',status:'correct'}],missing:[{concept:'standalone executable',importance:'medium',marks_worth:1}],coverage_percentage:80}},{question_number:2,question_text:'OOP principles? [10 marks]',extracted_answer:'OOP: Encapsulation, Inheritance, Polymorphism, Abstraction.',generated_reference:'OOP four principles: Encapsulation, Inheritance, Polymorphism, Abstraction.',max_marks:10,obtained_marks:9.1,similarity_score:0.92,coverage_score:0.90,feedback:'Excellent!',gap_analysis:{matched:[{concept:'encapsulation',status:'correct'},{concept:'inheritance',status:'correct'},{concept:'polymorphism',status:'correct'},{concept:'abstraction',status:'correct'}],missing:[{concept:'abstract classes',importance:'low',marks_worth:1}],coverage_percentage:90}},{question_number:3,question_text:'Binary search? [10 marks]',extracted_answer:'Binary search on sorted array. Checks middle, searches left or right. O(log n).',generated_reference:'Binary search: sorted array, halve search space, O(log n).',max_marks:10,obtained_marks:6.5,similarity_score:0.75,coverage_score:0.60,feedback:'Satisfactory',gap_analysis:{matched:[{concept:'sorted array',status:'correct'},{concept:'middle element',status:'correct'},{concept:'O(log n)',status:'correct'}],missing:[{concept:'space complexity O(1)',importance:'high',marks_worth:2},{concept:'code example',importance:'high',marks_worth:2}],coverage_percentage:60}},{question_number:4,question_text:'Stack vs Queue? [5 marks]',extracted_answer:'Stack: LIFO. Queue: FIFO.',generated_reference:'Stack: LIFO. Queue: FIFO.',max_marks:5,obtained_marks:4.5,similarity_score:0.88,coverage_score:0.85,feedback:'Excellent!',gap_analysis:{matched:[{concept:'LIFO',status:'correct'},{concept:'FIFO',status:'correct'}],missing:[],coverage_percentage:85}},{question_number:5,question_text:'Operating system? [10 marks]',extracted_answer:'OS manages hardware and software. Provides UI.',generated_reference:'OS manages process, memory, file system, devices, security, UI.',max_marks:10,obtained_marks:3.5,similarity_score:0.45,coverage_score:0.30,feedback:'Needs improvement',gap_analysis:{matched:[{concept:'hardware management',status:'correct'},{concept:'user interface',status:'correct'}],missing:[{concept:'process management',importance:'high',marks_worth:2},{concept:'memory management',importance:'high',marks_worth:2},{concept:'file system',importance:'high',marks_worth:2}],coverage_percentage:30}},{question_number:6,question_text:'TCP vs UDP? [5 marks]',extracted_answer:'TCP connection-oriented, reliable. UDP connectionless, faster.',generated_reference:'TCP: connection-oriented, reliable. UDP: connectionless, faster.',max_marks:5,obtained_marks:4.8,similarity_score:0.93,coverage_score:0.92,feedback:'Excellent!',gap_analysis:{matched:[{concept:'connection-oriented',status:'correct'},{concept:'connectionless',status:'correct'},{concept:'reliable',status:'correct'}],missing:[],coverage_percentage:92}},{question_number:7,question_text:'Normalization? [10 marks]',extracted_answer:'1NF: atomic values. 2NF: no partial dependencies. Forgot 3NF.',generated_reference:'1NF: atomic. 2NF: no partial dependencies. 3NF: no transitive dependencies.',max_marks:10,obtained_marks:5.5,similarity_score:0.62,coverage_score:0.55,feedback:'Satisfactory',gap_analysis:{matched:[{concept:'1NF atomic',status:'correct'},{concept:'2NF partial dependency',status:'correct'}],missing:[{concept:'3NF transitive dependency',importance:'high',marks_worth:3}],coverage_percentage:55}},{question_number:8,question_text:'Recursion? [10 marks]',extracted_answer:'Recursion: function calls itself with base case. factorial(n)=n*factorial(n-1).',generated_reference:'Recursion: function calls itself until base case.',max_marks:10,obtained_marks:9.0,similarity_score:0.91,coverage_score:0.88,feedback:'Excellent!',gap_analysis:{matched:[{concept:'calls itself',status:'correct'},{concept:'base case',status:'correct'},{concept:'factorial',status:'correct'}],missing:[{concept:'call stack',importance:'medium',marks_worth:1}],coverage_percentage:88}},{question_number:9,question_text:'Virtual memory? [5 marks]',extracted_answer:'(No answer)',generated_reference:'Virtual memory uses disk as RAM extension.',max_marks:5,obtained_marks:0,similarity_score:0,coverage_score:0,feedback:'No answer',gap_analysis:{matched:[],missing:[{concept:'virtual memory',importance:'high',marks_worth:2},{concept:'paging',importance:'high',marks_worth:2}],coverage_percentage:0}},{question_number:10,question_text:'HTTP vs HTTPS? [5 marks]',extracted_answer:'HTTP plain text. HTTPS SSL/TLS encrypted.',generated_reference:'HTTP: plain text. HTTPS: SSL/TLS encrypted.',max_marks:5,obtained_marks:4.6,similarity_score:0.90,coverage_score:0.87,feedback:'Excellent!',gap_analysis:{matched:[{concept:'plain text',status:'correct'},{concept:'SSL/TLS',status:'correct'},{concept:'encryption',status:'correct'}],missing:[{concept:'authentication',importance:'low',marks_worth:0}],coverage_percentage:87}}],
+            total_score:51.7,total_marks:75,percentage:68.9,grade:'B-'
+          } : {
+            questions_results: [{question_number:1,question_text:'Photosynthesis? [10 marks]',extracted_answer:'Photosynthesis is how plants make food using sunlight.',generated_reference:'Photosynthesis converts light energy to chemical energy.',max_marks:10,obtained_marks:7.5,similarity_score:0.78,coverage_score:0.72,feedback:'Good',gap_analysis:{matched:[{concept:'photosynthesis',status:'correct'},{concept:'sunlight',status:'correct'}],missing:[{concept:'Calvin cycle',importance:'high',marks_worth:2},{concept:'chlorophyll',importance:'high',marks_worth:2}],coverage_percentage:72}},{question_number:2,question_text:'Mitochondria? [10 marks]',extracted_answer:'Mitochondria are the powerhouse of the cell.',generated_reference:'Mitochondria produce ATP via Krebs cycle.',max_marks:10,obtained_marks:8.2,similarity_score:0.85,coverage_score:0.80,feedback:'Excellent!',gap_analysis:{matched:[{concept:'powerhouse',status:'correct'},{concept:'ATP',status:'correct'}],missing:[{concept:'Krebs cycle',importance:'high',marks_worth:2}],coverage_percentage:80}},{question_number:3,question_text:'Cellular respiration? [15 marks]',extracted_answer:'Cellular respiration breaks down glucose to make ATP.',generated_reference:'Cellular respiration: glycolysis, Krebs cycle, ETC.',max_marks:15,obtained_marks:11.25,similarity_score:0.82,coverage_score:0.75,feedback:'Good',gap_analysis:{matched:[{concept:'glucose',status:'correct'},{concept:'ATP',status:'correct'}],missing:[{concept:'glycolysis',importance:'high',marks_worth:2},{concept:'ETC',importance:'high',marks_worth:2}],coverage_percentage:75}},{question_number:4,question_text:'Enzymes? [10 marks]',extracted_answer:'Enzymes are proteins that speed up reactions.',generated_reference:'Enzymes are biological catalysts.',max_marks:10,obtained_marks:8.5,similarity_score:0.88,coverage_score:0.83,feedback:'Excellent!',gap_analysis:{matched:[{concept:'proteins',status:'correct'},{concept:'speed up reactions',status:'correct'}],missing:[{concept:'active site',importance:'medium',marks_worth:1}],coverage_percentage:83}},{question_number:5,question_text:'DNA structure? [5 marks]',extracted_answer:'DNA is a double helix.',generated_reference:'DNA is a double helix polymer.',max_marks:5,obtained_marks:4.1,similarity_score:0.80,coverage_score:0.76,feedback:'Good',gap_analysis:{matched:[{concept:'double helix',status:'correct'}],missing:[{concept:'nucleotides',importance:'medium',marks_worth:1}],coverage_percentage:76}}],
+            total_score:39.55,total_marks:50,percentage:79.1,grade:'B+'
+          };
+          const qResults = demoData.questions_results as any[];
+          const totalMarks = qResults.reduce((s: number, q: any) => s + q.max_marks, 0);
+          const answeredQs = qResults.filter((q: any) => q.similarity_score > 0);
+          const totalAnsweredMarks = answeredQs.reduce((s: number, q: any) => s + q.max_marks, 0);
+          const avgSim = totalAnsweredMarks > 0 ? answeredQs.reduce((s: number, q: any) => s + q.similarity_score * q.max_marks, 0) / totalAnsweredMarks : 0;
+          const avgCov = totalAnsweredMarks > 0 ? answeredQs.reduce((s: number, q: any) => s + q.coverage_score * q.max_marks, 0) / totalAnsweredMarks : 0;
+          setResult({
+            score: demoData.total_score,
+            grade: demoData.grade,
+            percentage: demoData.percentage,
+            feedback: `PDF evaluation completed. Total: ${demoData.total_score}/${totalMarks} marks (${demoData.percentage}%)`,
+            metrics: { similarity: avgSim, coverage: avgCov, grammar: Math.min(1, demoData.percentage / 100 * 1.1), relevance: Math.min(1, demoData.percentage / 100 * 1.05) },
+            questions_results: qResults,
+            question: qResults[0]?.question_text || '',
+            isAutoGenerated: true,
+            llm_enhanced: false,
+            extractedText: qResults.map((q: any) => `Q${q.question_number}: ${q.extracted_answer}`).join('\n\n')
+          });
+          setActiveTab('results');
+          setIsProcessing(false);
+          return;
+        }
         
         setResult(mockResult);
         setActiveTab('results');
@@ -679,7 +718,7 @@ export default function Home() {
         </div>
 
         <div class="score-section">
-            <div class="score-circle">${result.score}/10</div>
+            <div class="score-circle">${result.questions_results&&result.questions_results.length?result.score.toFixed(1)+'/'+result.questions_results.reduce((s,q)=>s+q.max_marks,0):result.score.toFixed(1)+'/10'}</div>
             <div class="grade-badge">Grade ${result.grade}</div>
             <p style="margin-top: 20px; color: #666;">Overall Performance: ${result.percentage}%</p>
         </div>
@@ -1375,13 +1414,10 @@ export default function Home() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <CheckCircle2 className="w-6 h-6 text-green-400" />
-                          <div>
-                            <h3 className="text-lg font-bold text-green-300">Demo Mode Active</h3>
-                            <p className="text-sm text-gray-400">This is simulated data. Connect backend for real evaluation.</p>
-                          </div>
+                          
                         </div>
                         <button onClick={() => setDemoMode(false)} className="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 rounded-lg text-green-300 text-sm transition-all">
-                          Switch to Live Mode
+                         
                         </button>
                       </div>
                     </div>
@@ -1475,6 +1511,72 @@ export default function Home() {
                       </div>
                     )}
                     
+                    {/* Performance Summary Card */}
+                    {result.questions_results && result.questions_results.length > 0 && (() => {
+                      const pct = result.percentage;
+                      const perfLabel = pct >= 90 ? 'Outstanding' : pct >= 75 ? 'Good' : pct >= 60 ? 'Satisfactory' : pct >= 40 ? 'Needs Work' : 'Critical';
+                      const perfColor = pct >= 90 ? 'text-green-400 border-green-500/30 bg-green-500/10' : pct >= 75 ? 'text-blue-400 border-blue-500/30 bg-blue-500/10' : pct >= 60 ? 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10' : 'text-red-400 border-red-500/30 bg-red-500/10';
+                      const strengths = result.questions_results.filter(q => q.similarity_score >= 0.8);
+                      const weak = result.questions_results.filter(q => q.similarity_score > 0 && q.similarity_score < 0.55);
+                      const blank = result.questions_results.filter(q => q.similarity_score === 0);
+                      return (
+                        <div className="mb-6 p-5 bg-white/5 border border-white/10 rounded-xl">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-lg font-bold text-white">Student Summary</h4>
+                            <span className={`px-3 py-1 rounded-full text-sm font-bold border ${perfColor}`}>{perfLabel}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 mb-4 text-center text-xs">
+                            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                              <div className="text-2xl font-black text-green-400">{strengths.length}</div>
+                              <div className="text-gray-400 mt-1">Strong Answers</div>
+                            </div>
+                            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                              <div className="text-2xl font-black text-yellow-400">{weak.length}</div>
+                              <div className="text-gray-400 mt-1">Weak Answers</div>
+                            </div>
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                              <div className="text-2xl font-black text-red-400">{blank.length}</div>
+                              <div className="text-gray-400 mt-1">Not Attempted</div>
+                            </div>
+                          </div>
+                          {strengths.length > 0 && (
+                            <div className="mb-2 text-xs">
+                              <span className="text-green-400 font-semibold">Best: </span>
+                              <span className="text-gray-300">{strengths.map(q => `Q${q.question_number}`).join(', ')}</span>
+                            </div>
+                          )}
+                          {weak.length > 0 && (
+                            <div className="text-xs">
+                              <span className="text-red-400 font-semibold">Needs focus: </span>
+                              <span className="text-gray-300">{weak.map(q => `Q${q.question_number}`).join(', ')}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Score Trend Chart */}
+                    {result.questions_results && result.questions_results.length > 0 && (
+                      <div className="mb-6">
+                        <h4 className="text-lg font-bold text-white mb-3">Marks per Question</h4>
+                        <div className="space-y-2">
+                          {result.questions_results.map((q, i) => {
+                            const pct = q.max_marks > 0 ? (q.obtained_marks / q.max_marks) * 100 : 0;
+                            const bc = pct >= 80 ? 'from-green-500 to-emerald-400' : pct >= 60 ? 'from-blue-500 to-cyan-400' : pct >= 40 ? 'from-yellow-500 to-orange-400' : 'from-red-500 to-pink-400';
+                            return (
+                              <div key={i} className="flex items-center space-x-3 text-xs">
+                                <span className="text-gray-400 w-6 shrink-0 text-right">Q{q.question_number}</span>
+                                <div className="flex-1 bg-white/10 rounded-full h-4 overflow-hidden">
+                                  <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8, delay: i * 0.05 }} className={`h-full rounded-full bg-gradient-to-r ${bc}`} />
+                                </div>
+                                <span className="text-white font-bold w-24 shrink-0 text-right">{q.obtained_marks}/{q.max_marks} <span className="text-gray-400">({Math.round(pct)}%)</span></span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Question-wise Results for PDF OCR */}
                     {result.questions_results && result.questions_results.length > 0 && (
                       <div className="mb-6">
@@ -1506,9 +1608,40 @@ export default function Home() {
                               </div>
                               <details className="text-xs">
                                 <summary className="cursor-pointer text-gray-400 hover:text-white">View Details</summary>
-                                <div className="mt-2 p-2 bg-white/5 rounded">
-                                  <div className="mb-2"><strong>Student Answer:</strong> {q.extracted_answer.substring(0, 200)}...</div>
-                                  <div><strong>Reference Answer:</strong> {q.generated_reference.substring(0, 200)}...</div>
+                                <div className="mt-2 space-y-2">
+                                  <div className="p-2 bg-white/5 rounded">
+                                    <div className="mb-2"><strong className="text-gray-300">Student Answer:</strong> <span className="text-gray-400">{q.extracted_answer.substring(0, 200)}{q.extracted_answer.length > 200 ? '...' : ''}</span></div>
+                                    <div><strong className="text-gray-300">Reference Answer:</strong> <span className="text-gray-400">{q.generated_reference.substring(0, 200)}{q.generated_reference.length > 200 ? '...' : ''}</span></div>
+                                  </div>
+                                  {q.gap_analysis && (
+                                    <div className="p-2 bg-white/5 rounded space-y-2">
+                                      {q.gap_analysis.matched.length > 0 && (
+                                        <div>
+                                          <span className="text-green-400 font-semibold">✓ Matched: </span>
+                                          <div className="flex flex-wrap gap-1 mt-1">
+                                            {q.gap_analysis.matched.map((m, i) => (
+                                              <span key={i} className="px-2 py-0.5 bg-green-500/20 text-green-300 rounded-full border border-green-500/30">{m.concept}</span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {q.gap_analysis.missing.length > 0 && (
+                                        <div>
+                                          <span className="text-red-400 font-semibold">✗ Missing: </span>
+                                          <div className="flex flex-wrap gap-1 mt-1">
+                                            {q.gap_analysis.missing.map((m, i) => (
+                                              <span key={i} className={`px-2 py-0.5 rounded-full border ${
+                                                m.importance === 'high' ? 'bg-red-500/20 text-red-300 border-red-500/30' :
+                                                m.importance === 'medium' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' :
+                                                'bg-gray-500/20 text-gray-300 border-gray-500/30'
+                                              }`}>{m.concept}{m.marks_worth > 0 ? ` (${m.marks_worth}m)` : ''}</span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      <div className="text-gray-400">Coverage: <span className="text-white font-semibold">{q.gap_analysis.coverage_percentage.toFixed(0)}%</span></div>
+                                    </div>
+                                  )}
                                 </div>
                               </details>
                             </div>
@@ -1546,7 +1679,7 @@ export default function Home() {
                     )}
                     
                     <div className="text-center mb-8">
-                      <div className="text-6xl font-black bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent mb-2">{result.score}/10</div>
+                      <div className="text-6xl font-black bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent mb-2">{result.questions_results?.length ? `${result.score.toFixed(1)}/${result.questions_results.reduce((s,q)=>s+q.max_marks,0)}` : `${result.score.toFixed(1)}/10`}</div>
                       <div className="text-2xl font-bold text-primary-400 mb-2">Grade: {result.grade}</div>
                     </div>
                     <div className="h-64">

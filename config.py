@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000, env="PORT")
     
     # Security
-    SECRET_KEY: str = Field(default="your-secret-key-change-in-production", env="SECRET_KEY")
+    SECRET_KEY: str = Field(default="", env="SECRET_KEY")
     ALLOWED_ORIGINS: str = Field(default="http://localhost:3000,http://127.0.0.1:3000", env="ALLOWED_ORIGINS")
     API_KEY: Optional[str] = Field(default=None, env="API_KEY")
     RATE_LIMIT_REQUESTS: int = Field(default=100, env="RATE_LIMIT_REQUESTS")
@@ -108,5 +108,11 @@ def get_settings() -> Settings:
         warnings.warn(
             f"Scoring weights do not sum to 1.0. Current sum: "
             f"{settings.WEIGHT_SIMILARITY + settings.WEIGHT_COVERAGE + settings.WEIGHT_GRAMMAR + settings.WEIGHT_RELEVANCE}"
+        )
+    if not settings.SECRET_KEY:
+        import warnings
+        warnings.warn(
+            "SECRET_KEY is not set. Please configure a strong secret key in your .env file.",
+            stacklevel=2
         )
     return settings

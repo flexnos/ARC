@@ -55,8 +55,28 @@ class ModelManager:
         # Load tokenizer if available
         try:
             if os.path.exists(settings.TOKENIZER_PATH):
-                with open(settings.TOKENIZER_PATH, "rb") as f:
-                    self.tokenizer = pickle.load(f)
+                # Warning: pickle files can execute arbitrary code if tampered with.
+                # Ensure tokenizer.pkl comes from a trusted source and has not been modified.
+                hash_file = settings.TOKENIZER_PATH + ".sha256"
+                if os.path.exists(hash_file):
+                    import hashlib
+                    with open(settings.TOKENIZER_PATH, "rb") as f:
+                        file_bytes = f.read()
+                    actual_hash = hashlib.sha256(file_bytes).hexdigest()
+                    with open(hash_file, "r") as hf:
+                        expected_hash = hf.read().strip()
+                    if actual_hash != expected_hash:
+                        logger.error("Tokenizer file hash mismatch — refusing to load potentially tampered file.")
+                        self.tokenizer = None
+                        return
+                    self.tokenizer = pickle.loads(file_bytes)
+                else:
+                    logger.warning(
+                        f"No .sha256 hash file found for tokenizer at {settings.TOKENIZER_PATH}. "
+                        "Loading anyway, but consider generating a hash file for integrity verification."
+                    )
+                    with open(settings.TOKENIZER_PATH, "rb") as f:
+                        self.tokenizer = pickle.load(f)
                 logger.info("Loaded tokenizer")
             else:
                 logger.warning(f"Tokenizer not found at {settings.TOKENIZER_PATH}")
