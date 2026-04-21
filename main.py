@@ -35,6 +35,28 @@ logger = logging.getLogger(__name__)
 
 _easyocr_reader = None
 
+REF_ANSWERS_LOG = "ref_answers_log.txt"
+
+def _log_ref_answer(mode: str, question: str, reference_answer: str, eval_id: str = ""):
+    """Append AI-generated reference answer to the log file."""
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sep = "=" * 60
+        entry = (
+            f"\n{sep}\n"
+            f"Timestamp  : {timestamp}\n"
+            f"Mode       : {mode}\n"
+            f"Eval ID    : {eval_id}\n"
+            f"Question   : {question[:200]}\n"
+            f"{'-' * 60}\n"
+            f"Reference Answer:\n{reference_answer}\n"
+            f"{sep}\n"
+        )
+        with open(REF_ANSWERS_LOG, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception as e:
+        logger.warning(f"Failed to log ref answer: {e}")
+
 
 def _get_llm_usage_stats() -> Dict[str, Any]:
     """Get current LLM API usage statistics."""
@@ -269,7 +291,8 @@ async def evaluate(request: Request, data: AnswerRequest):
         gap_analysis = perform_gap_analysis(reference, student)
     
     processing_time_ms = int((time.time() - start_time) * 1000)
-    
+    _log_ref_answer("text", question, reference, str(int(time.time())))
+
     db = get_db_manager()
     eval_id = db.save_evaluation(
         evaluation_type="single",
@@ -416,7 +439,8 @@ async def evaluate_ocr(
         gap_analysis = perform_gap_analysis(reference_answer, student_answer)
         
         processing_time_ms = int((time.time() - start_time) * 1000)
-        
+        _log_ref_answer("ocr", question, reference_answer, str(int(time.time())))
+
         db = get_db_manager()
         eval_id = db.save_evaluation(
             evaluation_type="ocr",
@@ -501,7 +525,8 @@ async def evaluate_ocr_fast(
         final_score = (similarity + coverage + grammar + relevance) / 4 * 10
         grade = determine_grade(final_score)
         feedback = generate_feedback(final_score, similarity, coverage, grammar, relevance)
-        
+        _log_ref_answer("ocr-fast", question, reference_answer, str(int(time.time())))
+
         processing_time_ms = int((time.time() - start_time) * 1000)
         
         return {
@@ -611,7 +636,8 @@ async def evaluate_ocr_accurate(
         gap_analysis = perform_gap_analysis(reference_answer, student_answer)
         
         processing_time_ms = int((time.time() - start_time) * 1000)
-        
+        _log_ref_answer("ocr-accurate", question, reference_answer, str(int(time.time())))
+
         db = get_db_manager()
         eval_id = db.save_evaluation(
             evaluation_type="ocr_accurate",
@@ -912,7 +938,10 @@ async def evaluate_pdf_handwritten(
             
             generator = get_reference_generator()
             ref_answers = generator.generate_references_for_questions(questions)
-            
+            for q in questions:
+                if q.number in ref_answers:
+                    _log_ref_answer("pdf-handwritten", q.text, ref_answers[q.number], str(int(time.time())))
+
             llm_scorer = GeminiEnhancedScorer() if use_llm else None
             
             results = []
@@ -1123,7 +1152,8 @@ async def evaluate_batch(
             
             if not reference:
                 raise HTTPException(status_code=400, detail="Reference answer required")
-            
+            _log_ref_answer("batch", question_text, reference, str(int(time.time())))
+
             llm_scorer = GeminiEnhancedScorer() if use_llm else None
             
             results = []
@@ -1322,6 +1352,21 @@ async def evaluate_pdf_auto(
     except Exception as e:
         logger.error(f"PDF evaluation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+
+
+class RefLogRequest(BaseModel):
+    text: str
+
+@app.post("/log-ref-answers")
+async def log_ref_answers(data: RefLogRequest):
+    """Append AI reference answers from demo mode to the log file."""
+    try:
+        with open(REF_ANSWERS_LOG, "a", encoding="utf-8") as f:
+            f.write(data.text + "\n")
+        return {"status": "ok"}
+    except Exception as e:
+        logger.warning(f"Failed to write ref log: {e}")
+        return {"status": "error"}
 
 
 if __name__ == "__main__":

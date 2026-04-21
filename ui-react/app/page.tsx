@@ -120,8 +120,28 @@ export default function Home() {
   const [useLLM, setUseLLM] = useState(true);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   
+  const [processingStep, setProcessingStep] = useState(0);
+
   // OCR Speed Mode
   const [quickOcrMode, setQuickOcrMode] = useState(true);
+  const PROCESSING_STEPS = [
+    'Extracting text from document...',
+    'Generating reference answers...',
+    'Computing semantic similarity...',
+    'Analysing content coverage...',
+    'Checking grammar quality...',
+    'Running relevance scoring...',
+    'Performing gap analysis...',
+    'Compiling evaluation report...'
+  ];
+
+  useEffect(() => {
+    if (!isProcessing) { setProcessingStep(0); return; }
+    const interval = setInterval(() => {
+      setProcessingStep(prev => (prev + 1) % PROCESSING_STEPS.length);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isProcessing]);
   
   // Auto-populate fields when subject changes in demo mode
   useEffect(() => {
@@ -210,7 +230,8 @@ export default function Home() {
     try {
       // DEMO MODE - Use mock data
       if (demoMode) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 8000));
+        await new Promise(resolve => setTimeout(resolve, 500)); // let overlay linger briefly
         
         const sampleData: {[key: string]: {question: string, studentAnswer: string, referenceAnswer: string}} = {
           general: {
@@ -271,6 +292,42 @@ export default function Home() {
           missing_concepts: useLLM ? ['Calvin cycle', 'light-dependent reactions'] : undefined
         };
         
+        // BATCH demo mode
+        if (activeTab === 'batch') {
+          const DEMO_BATCH = {
+            exam_name: 'Biology Mid-Term Exam - Photosynthesis & Cell Biology',
+            total_students: 5,
+            average_score: 7.42,
+            average_percentage: 74.2,
+            class_grade: 'B',
+            highest_score: 9.15,
+            lowest_score: 5.80,
+            results: [
+              { student_name: 'Alice Johnson', student_id: '2024-BIO-001', final_score: 9.15, percentage: 91.5, grade: 'A+', feedback: 'Excellent work! Outstanding understanding of cellular processes.', similarity: 0.92, coverage: 0.91, grammar: 0.95, relevance: 0.93, question_scores: [{question:1,marks:9.2,max:10},{question:2,marks:9.0,max:10},{question:3,marks:9.3,max:10},{question:4,marks:9.0,max:10},{question:5,marks:4.6,max:5}] },
+              { student_name: 'Bob Smith', student_id: '2024-BIO-002', final_score: 8.45, percentage: 84.5, grade: 'A', feedback: 'Good answer with solid understanding. Minor improvements needed.', similarity: 0.85, coverage: 0.84, grammar: 0.88, relevance: 0.86, question_scores: [{question:1,marks:8.5,max:10},{question:2,marks:8.2,max:10},{question:3,marks:8.6,max:10},{question:4,marks:8.4,max:10},{question:5,marks:4.2,max:5}] },
+              { student_name: 'Carol White', student_id: '2024-BIO-003', final_score: 7.60, percentage: 76.0, grade: 'B+', feedback: 'Satisfactory answer but needs improvement in key areas.', similarity: 0.76, coverage: 0.75, grammar: 0.80, relevance: 0.78, question_scores: [{question:1,marks:7.8,max:10},{question:2,marks:7.5,max:10},{question:3,marks:7.4,max:10},{question:4,marks:7.6,max:10},{question:5,marks:3.8,max:5}] },
+              { student_name: 'David Brown', student_id: '2024-BIO-004', final_score: 6.85, percentage: 68.5, grade: 'B-', feedback: 'Basic understanding shown but significant improvements needed.', similarity: 0.68, coverage: 0.67, grammar: 0.72, relevance: 0.70, question_scores: [{question:1,marks:7.0,max:10},{question:2,marks:6.5,max:10},{question:3,marks:7.2,max:10},{question:4,marks:6.8,max:10},{question:5,marks:3.4,max:5}] },
+              { student_name: 'Emma Davis', student_id: '2024-BIO-005', final_score: 5.80, percentage: 58.0, grade: 'C-', feedback: 'Answer requires substantial revision. Please review the topic.', similarity: 0.58, coverage: 0.56, grammar: 0.62, relevance: 0.60, question_scores: [{question:1,marks:6.0,max:10},{question:2,marks:5.5,max:10},{question:3,marks:6.2,max:10},{question:4,marks:5.8,max:10},{question:5,marks:2.9,max:5}] },
+            ],
+            statistics: { pass_rate: 100.0, excellence_rate: 40.0, grade_distribution: { 'A+':1,'A':1,'B+':1,'B':0,'B-':1,'C+':0,'C':0,'C-':1,'D':0,'F':0 } }
+          };
+          setResult({
+            score: DEMO_BATCH.average_score,
+            grade: DEMO_BATCH.class_grade,
+            percentage: DEMO_BATCH.average_percentage,
+            feedback: `Batch evaluation completed for ${DEMO_BATCH.total_students} students. Class average: ${DEMO_BATCH.average_score}/10 (${DEMO_BATCH.average_percentage}%)`,
+            metrics: { similarity: 0.76, coverage: 0.75, grammar: 0.79, relevance: 0.77 },
+            batchResults: DEMO_BATCH.results.map(s => ({ student_name: s.student_name, student_answer: '', similarity: s.similarity, coverage: s.coverage, grammar: s.grammar, relevance: s.relevance, final_score: s.final_score, grade: s.grade, feedback: s.feedback })),
+            batchStats: { totalStudents: DEMO_BATCH.total_students, averageScore: DEMO_BATCH.average_score, highestScore: DEMO_BATCH.highest_score, lowestScore: DEMO_BATCH.lowest_score },
+            question: DEMO_BATCH.exam_name,
+            isAutoGenerated: true,
+            llm_enhanced: false,
+          });
+          setActiveTab('results');
+          setIsProcessing(false);
+          return;
+        }
+
         // OCR mode - detect PDF by filename and show matching demo data
         if (activeTab === 'ocr') {
           const uploadedName = (selectedFiles.ocrPdf?.name || selectedFiles.ocrImage?.name || '').toLowerCase();
@@ -539,6 +596,98 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Generate downloadable HTML report
+  const generateExaminerTxt = () => {
+    if (!result) return;
+    const lines: string[] = [];
+    const sep = '='.repeat(70);
+    const dash = '-'.repeat(70);
+
+    lines.push(sep);
+    lines.push('  EXAMINER REFERENCE REPORT');
+    lines.push(`  Generated: ${new Date().toLocaleString()}`);
+    if (result.question) lines.push(`  Exam: ${result.question}`);
+    lines.push(sep);
+    lines.push('');
+
+    if (result.questions_results && result.questions_results.length > 0) {
+      // PDF / OCR multi-question mode
+      result.questions_results.forEach((q) => {
+        lines.push(`QUESTION ${q.question_number}  [${q.max_marks} marks]`);
+        lines.push(dash);
+        lines.push(`${q.question_text}`);
+        lines.push('');
+        lines.push('AI REFERENCE ANSWER:');
+        lines.push(q.generated_reference);
+        lines.push('');
+        lines.push('STUDENT ANSWER:');
+        lines.push(q.extracted_answer);
+        lines.push('');
+        lines.push(`MARKS AWARDED : ${q.obtained_marks} / ${q.max_marks}`);
+        lines.push(`SIMILARITY    : ${(q.similarity_score * 100).toFixed(0)}%`);
+        lines.push(`COVERAGE      : ${(q.coverage_score * 100).toFixed(0)}%`);
+        lines.push(`FEEDBACK      : ${q.feedback}`);
+        if (q.gap_analysis) {
+          if (q.gap_analysis.matched.length > 0)
+            lines.push(`MATCHED       : ${q.gap_analysis.matched.map(m => m.concept).join(', ')}`);
+          if (q.gap_analysis.missing.length > 0)
+            lines.push(`MISSING       : ${q.gap_analysis.missing.map(m => `${m.concept} (${m.importance})`).join(', ')}`);
+        }
+        lines.push('');
+        lines.push(sep);
+        lines.push('');
+      });
+      lines.push(`TOTAL SCORE: ${result.score} / ${result.questions_results.reduce((s, q) => s + q.max_marks, 0)}`);
+      lines.push(`PERCENTAGE : ${result.percentage}%`);
+      lines.push(`GRADE      : ${result.grade}`);
+    } else if (result.batchResults && result.batchResults.length > 0) {
+      // Batch mode
+      lines.push(`EXAM        : ${result.question || 'Batch Evaluation'}`);
+      lines.push(`STUDENTS    : ${result.batchResults.length}`);
+      lines.push(`CLASS AVG   : ${result.score.toFixed(2)} / 10`);
+      lines.push(`CLASS GRADE : ${result.grade}`);
+      lines.push('');
+      lines.push(sep);
+      lines.push('');
+      result.batchResults.forEach((s, i) => {
+        lines.push(`STUDENT ${i + 1}: ${s.student_name}`);
+        lines.push(dash);
+        lines.push(`SCORE      : ${s.final_score.toFixed(2)} / 10`);
+        lines.push(`GRADE      : ${s.grade}`);
+        lines.push(`SIMILARITY : ${(s.similarity * 100).toFixed(0)}%`);
+        lines.push(`COVERAGE   : ${(s.coverage * 100).toFixed(0)}%`);
+        lines.push(`GRAMMAR    : ${(s.grammar * 100).toFixed(0)}%`);
+        lines.push(`RELEVANCE  : ${(s.relevance * 100).toFixed(0)}%`);
+        lines.push(`FEEDBACK   : ${s.feedback}`);
+        lines.push('');
+        lines.push(sep);
+        lines.push('');
+      });
+    } else {
+      // Single text evaluation
+      if (result.question) { lines.push('QUESTION:'); lines.push(result.question); lines.push(''); }
+      if (result.referenceAnswer) { lines.push('AI REFERENCE ANSWER:'); lines.push(result.referenceAnswer); lines.push(''); }
+      if (result.studentAnswer) { lines.push('STUDENT ANSWER:'); lines.push(result.studentAnswer); lines.push(''); }
+      lines.push(dash);
+      lines.push(`SCORE    : ${result.score.toFixed(2)} / 10`);
+      lines.push(`GRADE    : ${result.grade}`);
+      lines.push(`FEEDBACK : ${result.feedback}`);
+    }
+
+    lines.push('');
+    lines.push('-- End of Examiner Report --');
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `examiner-report-${Date.now()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Generate downloadable HTML report
@@ -1080,7 +1229,7 @@ export default function Home() {
                 </div>
 
                 <button onClick={handleEvaluate} disabled={isProcessing} className={`w-full py-4 rounded-xl font-bold transition-all duration-300 ${useLLM ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/30' : 'btn-primary'} disabled:opacity-50`}>
-                  {isProcessing ? 'Evaluating...' : useLLM ? '✨ Evaluate with AI' : 'Evaluate Answer'}
+                  {isProcessing ? <span className="flex items-center justify-center space-x-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/><span>{PROCESSING_STEPS[processingStep]}</span></span> : useLLM ? '✨ Evaluate with AI' : 'Evaluate Answer'}
                 </button>
               </div>
             </motion.div>
@@ -1137,7 +1286,7 @@ export default function Home() {
                 )}
 
                 <button onClick={handleEvaluate} disabled={isProcessing} className={`w-full py-4 rounded-xl font-bold transition-all duration-300 ${useLLM ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/30' : 'btn-primary'} disabled:opacity-50`}>
-                  {isProcessing ? 'Processing...' : useLLM ? '✨ Start Advanced Evaluation with AI' : 'Start Advanced Evaluation'}
+                  {isProcessing ? <span className="flex items-center justify-center space-x-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/><span>{PROCESSING_STEPS[processingStep]}</span></span> : useLLM ? '✨ Start Advanced Evaluation with AI' : 'Start Advanced Evaluation'}
                 </button>
               </div>
             </motion.div>
@@ -1365,7 +1514,7 @@ export default function Home() {
                   } disabled:opacity-50`}
                 >
                   {isProcessing ? (
-                    'Extracting & Evaluating...'
+                    <span className="flex items-center justify-center space-x-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/><span>{PROCESSING_STEPS[processingStep]}</span></span>
                   ) : useLLM ? (
                     <span className="flex items-center justify-center space-x-2">
                       <Brain className="w-5 h-5" />
@@ -1421,7 +1570,7 @@ export default function Home() {
                 </div>
 
                 <button onClick={handleEvaluate} disabled={!selectedFiles.batchFile || isProcessing} className={`w-full py-4 rounded-xl font-bold transition-all duration-300 ${useLLM ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-lg shadow-purple-500/30' : 'btn-primary'} disabled:opacity-50`}>
-                  {isProcessing ? 'Processing Batch...' : useLLM ? '✨ Start Batch Evaluation with AI' : 'Start Batch Evaluation'}
+                  {isProcessing ? <span className="flex items-center justify-center space-x-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/><span>{PROCESSING_STEPS[processingStep]}</span></span> : useLLM ? '✨ Start Batch Evaluation with AI' : 'Start Batch Evaluation'}
                 </button>
               </div>
             </motion.div>
@@ -1890,6 +2039,50 @@ export default function Home() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Processing Overlay */}
+      <AnimatePresence>
+        {isProcessing && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-dark-950/80 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="card-glass p-10 max-w-sm w-full mx-4 text-center"
+            >
+              <div className="relative w-20 h-20 mx-auto mb-6">
+                <div className="absolute inset-0 rounded-full border-4 border-primary-500/20" />
+                <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary-400 animate-spin" />
+                <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-purple-400 animate-spin" style={{ animationDuration: '1.5s', animationDirection: 'reverse' }} />
+                <Brain className="absolute inset-0 m-auto w-8 h-8 text-primary-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">AI Evaluating</h3>
+              <motion.p
+                key={processingStep}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-sm text-primary-300 mb-6 h-5"
+              >
+                {PROCESSING_STEPS[processingStep]}
+              </motion.p>
+              <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                <motion.div
+                  initial={{ width: '0%' }}
+                  animate={{ width: '100%' }}
+                  transition={{ duration: 8, ease: 'linear' }}
+                  className="h-full bg-gradient-to-r from-primary-500 to-purple-500 rounded-full"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-3">This may take a few seconds...</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }
