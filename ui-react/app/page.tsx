@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FileText, Upload, Brain, BarChart3, CheckCircle2, Sparkles, ChevronRight,
@@ -787,11 +787,40 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const sampleData = [
-    { subject: 'Similarity', A: 85, fullMark: 100 },
-    { subject: 'Coverage', A: 78, fullMark: 100 },
-    { subject: 'Grammar', A: 92, fullMark: 100 },
-    { subject: 'Relevance', A: 88, fullMark: 100 },
+  // Animated score counter
+  const [displayScore, setDisplayScore] = useState(0);
+  useEffect(() => {
+    if (!result) return;
+    const target = result.questions_results?.length
+      ? (result.score / result.questions_results.reduce((s, q) => s + q.max_marks, 0)) * 100
+      : result.percentage;
+    let start = 0;
+    const step = target / 40;
+    const timer = setInterval(() => {
+      start += step;
+      if (start >= target) { setDisplayScore(target); clearInterval(timer); }
+      else setDisplayScore(start);
+    }, 30);
+    return () => clearInterval(timer);
+  }, [result]);
+
+  const getGradeStyle = (grade: string) => {
+    if (grade.startsWith('A')) return { text: 'text-yellow-300', glow: 'shadow-yellow-500/50', bg: 'from-yellow-500/20 to-amber-500/20', border: 'border-yellow-500/50' };
+    if (grade.startsWith('B')) return { text: 'text-blue-300', glow: 'shadow-blue-500/50', bg: 'from-blue-500/20 to-cyan-500/20', border: 'border-blue-500/50' };
+    if (grade.startsWith('C')) return { text: 'text-green-300', glow: 'shadow-green-500/50', bg: 'from-green-500/20 to-emerald-500/20', border: 'border-green-500/50' };
+    return { text: 'text-red-300', glow: 'shadow-red-500/50', bg: 'from-red-500/20 to-pink-500/20', border: 'border-red-500/50' };
+  };
+
+  const radarData = result ? [
+    { subject: 'Similarity', A: Math.round(result.metrics.similarity * 100), fullMark: 100 },
+    { subject: 'Coverage', A: Math.round(result.metrics.coverage * 100), fullMark: 100 },
+    { subject: 'Grammar', A: Math.round(result.metrics.grammar * 100), fullMark: 100 },
+    { subject: 'Relevance', A: Math.round(result.metrics.relevance * 100), fullMark: 100 },
+  ] : [
+    { subject: 'Similarity', A: 0, fullMark: 100 },
+    { subject: 'Coverage', A: 0, fullMark: 100 },
+    { subject: 'Grammar', A: 0, fullMark: 100 },
+    { subject: 'Relevance', A: 0, fullMark: 100 },
   ];
 
   return (
@@ -1582,12 +1611,16 @@ export default function Home() {
                       <div className="mb-6">
                         <h4 className="text-lg font-bold text-white mb-4">Question-wise Results</h4>
                         <div className="space-y-4 max-h-96 overflow-y-auto">
-                          {result.questions_results.map((q, idx) => (
-                            <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4">
+                          {result.questions_results.map((q, idx) => {
+                            const qPct = q.max_marks > 0 ? (q.obtained_marks / q.max_marks) * 100 : 0;
+                            const qBorder = qPct >= 80 ? 'border-green-500/40 bg-green-500/5' : qPct >= 60 ? 'border-blue-500/40 bg-blue-500/5' : qPct >= 40 ? 'border-yellow-500/40 bg-yellow-500/5' : q.similarity_score === 0 ? 'border-red-500/40 bg-red-500/5' : 'border-orange-500/40 bg-orange-500/5';
+                            const qScoreColor = qPct >= 80 ? 'text-green-400' : qPct >= 60 ? 'text-blue-400' : qPct >= 40 ? 'text-yellow-400' : 'text-red-400';
+                            return (
+                            <motion.div key={idx} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.04 }} className={`border rounded-xl p-4 ${qBorder}`}>
                               <div className="flex justify-between items-start mb-3">
                                 <h5 className="font-bold text-primary-400">Question {q.question_number}</h5>
                                 <div className="text-right">
-                                  <span className="text-lg font-bold text-green-400">{q.obtained_marks}/{q.max_marks}</span>
+                                  <span className={`text-lg font-bold ${qScoreColor}`}>{q.obtained_marks}/{q.max_marks}</span>
                                   <div className="text-xs text-gray-400">marks</div>
                                 </div>
                               </div>
@@ -1644,8 +1677,9 @@ export default function Home() {
                                   )}
                                 </div>
                               </details>
-                            </div>
-                          ))}
+                            </motion.div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -1678,13 +1712,48 @@ export default function Home() {
                       </div>
                     )}
                     
+                    {/* Animated Score + Grade Badge */}
                     <div className="text-center mb-8">
-                      <div className="text-6xl font-black bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent mb-2">{result.questions_results?.length ? `${result.score.toFixed(1)}/${result.questions_results.reduce((s,q)=>s+q.max_marks,0)}` : `${result.score.toFixed(1)}/10`}</div>
-                      <div className="text-2xl font-bold text-primary-400 mb-2">Grade: {result.grade}</div>
+                      <motion.div
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                        className="text-6xl font-black bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent mb-4"
+                      >
+                        {result.questions_results?.length
+                          ? `${result.score.toFixed(1)}/${result.questions_results.reduce((s,q)=>s+q.max_marks,0)}`
+                          : `${result.score.toFixed(1)}/10`}
+                      </motion.div>
+                      {(() => {
+                        const gs = getGradeStyle(result.grade);
+                        return (
+                          <motion.div
+                            initial={{ scale: 0, rotate: -10 }}
+                            animate={{ scale: 1, rotate: 0 }}
+                            transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.2 }}
+                            className={`inline-flex flex-col items-center px-8 py-4 rounded-2xl bg-gradient-to-br ${gs.bg} border-2 ${gs.border} shadow-2xl ${gs.glow} mb-4`}
+                          >
+                            <span className={`text-5xl font-black ${gs.text}`}>{result.grade}</span>
+                            <span className="text-xs text-gray-400 mt-1 font-semibold tracking-widest uppercase">Grade</span>
+                          </motion.div>
+                        );
+                      })()}
+                      <div className="mt-3">
+                        <div className="text-sm text-gray-400 mb-1">Overall Performance</div>
+                        <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${displayScore}%` }}
+                            transition={{ duration: 1.2, ease: 'easeOut' }}
+                            className={`h-full rounded-full bg-gradient-to-r ${getGradeStyle(result.grade).bg.replace('/20', '')}`}
+                          />
+                        </div>
+                        <div className="text-lg font-bold text-white mt-1">{displayScore.toFixed(1)}%</div>
+                      </div>
                     </div>
                     <div className="h-64">
                       <ResponsiveContainer width="100%" height="100%">
-                        <RadarChart data={sampleData}>
+                        <RadarChart data={radarData}>
                           <PolarGrid stroke="#374151" />
                           <PolarAngleAxis dataKey="subject" tick={{ fill: '#9CA3AF' }} />
                           <Radar name="Score" dataKey="A" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.5} />
