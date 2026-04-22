@@ -108,7 +108,9 @@ interface Result {
 }
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'home' | 'text' | 'advanced' | 'ocr' | 'batch' | 'results'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'text' | 'advanced' | 'ocr' | 'batch' | 'results' | 'history'>('home');
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [evaluationMode, setEvaluationMode] = useState<'manual' | 'auto'>('auto');
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -199,6 +201,17 @@ export default function Home() {
   const [ocrQuestion, setOcrQuestion] = useState('');
   const [extractedText, setExtractedText] = useState('');
   const [handwrittenUploadType, setHandwrittenUploadType] = useState<'pdf' | 'image'>('image');
+
+  const fetchHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/history?limit=30');
+      if (res.ok) { const data = await res.json(); setHistoryData(data); }
+    } catch (_) {}
+    setHistoryLoading(false);
+  };
+
+  useEffect(() => { if (activeTab === 'history') fetchHistory(); }, [activeTab]);
 
   const handleFileSelect = (type: string, file: File | null) => {
     setSelectedFiles(prev => ({ ...prev, [type]: file }));
@@ -363,6 +376,7 @@ export default function Home() {
         }
         
         setResult(mockResult);
+        setHistoryData(prev => [{score:mockResult.score,grade:mockResult.grade,label:mockResult.question||'Text Evaluation',mode:'text',time:new Date().toLocaleString()},...prev]);
         setActiveTab('results');
         setIsProcessing(false);
         return;
@@ -599,6 +613,26 @@ export default function Home() {
   };
 
   // Generate downloadable HTML report
+  const generateReportCard = () => {
+    if (!result) return;
+    const grade = result.grade;
+    const gc = grade.startsWith('A') ? '#f59e0b' : grade.startsWith('B') ? '#3b82f6' : grade.startsWith('C') ? '#10b981' : '#ef4444';
+    const totalMarks = result.questions_results?.reduce((s, q) => s + q.max_marks, 0) || 10;
+    const scoreDisplay = result.questions_results?.length ? `${result.score.toFixed(1)}/${totalMarks}` : `${result.score.toFixed(1)}/10`;
+    const rows = result.questions_results?.map(q => {
+      const pct = q.max_marks > 0 ? (q.obtained_marks / q.max_marks) * 100 : 0;
+      const c = pct >= 80 ? '#10b981' : pct >= 60 ? '#3b82f6' : pct >= 40 ? '#f59e0b' : '#ef4444';
+      return `<tr style="border-bottom:1px solid #e5e7eb"><td style="padding:10px;font-weight:600">${q.question_number}</td><td style="padding:10px;color:#6b7280;font-size:13px">${q.question_text.substring(0, 80)}...</td><td style="padding:10px;text-align:center;font-weight:700;color:${c}">${q.obtained_marks}/${q.max_marks}</td><td style="padding:10px;text-align:center"><span style="background:${c}20;color:${c};padding:2px 8px;border-radius:12px;font-size:12px">${q.feedback}</span></td></tr>`;
+    }).join('') || '';
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',sans-serif;background:#f3f4f6;padding:30px}.card{max-width:800px;margin:0 auto;background:white;border-radius:20px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.15)}.header{background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:40px;text-align:center}.header h1{font-size:28px}.score-row{display:flex;justify-content:center;gap:40px;padding:30px;background:#f9fafb;border-bottom:2px solid #e5e7eb}.score-box{text-align:center}.big{font-size:48px;font-weight:900;color:#667eea}.grade{display:inline-block;padding:8px 24px;border-radius:50px;font-size:28px;font-weight:900;color:${gc};border:3px solid ${gc}}.lbl{font-size:12px;color:#9ca3af;text-transform:uppercase;margin-top:4px}.sec{padding:30px}.sec h3{font-size:16px;font-weight:700;color:#374151;margin-bottom:15px;padding-bottom:8px;border-bottom:2px solid #e5e7eb}table{width:100%;border-collapse:collapse}th{background:#f9fafb;padding:10px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase}.fb{background:#f0f4ff;border-left:4px solid #667eea;padding:15px;border-radius:8px;color:#374151;line-height:1.6}.footer{text-align:center;padding:20px;color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb}</style></head><body><div class="card"><div class="header"><h1>Student Evaluation Report Card</h1><p>Generated: ${new Date().toLocaleString()}</p></div><div class="score-row"><div class="score-box"><div class="big">${scoreDisplay}</div><div class="lbl">Score</div></div><div class="score-box"><div class="grade">${grade}</div><div class="lbl">Grade</div></div><div class="score-box"><div class="big" style="font-size:36px">${result.percentage.toFixed(1)}%</div><div class="lbl">Percentage</div></div></div>${result.questions_results?.length ? `<div class="sec"><h3>Question-wise Performance</h3><table><thead><tr><th>Q#</th><th>Question</th><th>Marks</th><th>Feedback</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}<div class="sec"><h3>AI Feedback</h3><div class="fb">${result.feedback}</div></div>${result.matched_concepts?.length ? `<div class="sec"><h3>Concepts Covered</h3><div style="display:flex;flex-wrap:wrap;gap:8px">${result.matched_concepts.map(c => `<span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:20px;font-size:13px">${c}</span>`).join('')}</div></div>` : ''}<div class="footer">ARC - AI Answer Evaluation System</div></div></body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `report-card-${Date.now()}.html`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
   const generateExaminerTxt = () => {
     if (!result) return;
     const lines: string[] = [];
@@ -1001,7 +1035,8 @@ export default function Home() {
                 { id: 'advanced', icon: Brain, label: 'Advanced' },
                 { id: 'ocr', icon: ImageIcon, label: 'OCR' },
                 { id: 'batch', icon: Layers, label: 'Batch' },
-                { id: 'results', icon: BarChart3, label: 'Results' }
+                { id: 'results', icon: BarChart3, label: 'Results' },
+                { id: 'history', icon: TrendingUp, label: 'History' }
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -1603,6 +1638,7 @@ export default function Home() {
                   
                   {/* Download Button */}
                   <div className="lg:col-span-2 flex justify-end mb-4">
+                    <button onClick={generateReportCard} className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl transition-all mr-3"><Award className="w-4 h-4" /><span className="ml-2">Report Card</span></button>
                     <button onClick={generateHTMLReport} className="btn-primary flex items-center space-x-2">
                       <FileText className="w-5 h-5" />
                       <span>Download HTML Report</span>
@@ -2040,6 +2076,60 @@ export default function Home() {
         </AnimatePresence>
       </div>
 
+
+          {activeTab === 'history' && (
+            <motion.div key="history" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-5xl mx-auto space-y-8">
+              <div className="text-center">
+                <h2 className="text-4xl font-bold text-white mb-4">Score History</h2>
+                <p className="text-gray-400">Track evaluation scores over time</p>
+                <button onClick={fetchHistory} className="mt-4 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-gray-300 text-sm transition-all">{historyLoading ? 'Loading...' : 'Refresh'}</button>
+              </div>
+              {historyData.length > 0 ? (
+                <div className="space-y-6">
+                  <div className="card-glass p-6">
+                    <h3 className="text-lg font-bold text-white mb-4">Score Trend</h3>
+                    <div className="h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={[...historyData].reverse().map((h,i)=>({name:`#${i+1}`,score:h.score}))}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis dataKey="name" tick={{fill:'#9CA3AF',fontSize:12}} />
+                          <YAxis domain={[0,10]} tick={{fill:'#9CA3AF',fontSize:12}} />
+                          <Tooltip contentStyle={{backgroundColor:'rgba(17,24,39,0.9)',border:'1px solid rgba(139,92,246,0.3)',borderRadius:'12px'}} formatter={(v:any)=>[v?.toFixed(2),'Score']} />
+                          <Line type="monotone" dataKey="score" stroke="#8b5cf6" strokeWidth={3} dot={{fill:'#8b5cf6',r:5}} activeDot={{r:8}} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className="card-glass p-6">
+                    <h3 className="text-lg font-bold text-white mb-4">Recent Evaluations</h3>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {historyData.map((h,i) => {
+                        const gs = getGradeStyle(h.grade || 'C');
+                        return (
+                          <div key={i} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all">
+                            <div className="flex items-center space-x-4">
+                              <span className={`text-lg font-black ${gs.text}`}>{h.grade}</span>
+                              <div>
+                                <div className="text-sm font-semibold text-white">{h.label}</div>
+                                <div className="text-xs text-gray-400">{h.mode} &bull; {h.time}</div>
+                              </div>
+                            </div>
+                            <div className="text-xl font-bold text-primary-400">{h.score.toFixed(2)}/10</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-20">
+                  <TrendingUp className="w-24 h-24 text-gray-600 mx-auto mb-6" />
+                  <h3 className="text-2xl font-bold text-white mb-4">{historyLoading ? 'Loading...' : 'No history yet'}</h3>
+                  <p className="text-gray-400">Run evaluations to see score history here</p>
+                </div>
+              )}
+            </motion.div>
+          )}
       {/* Processing Overlay */}
       <AnimatePresence>
         {isProcessing && (
